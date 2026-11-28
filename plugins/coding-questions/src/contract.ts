@@ -1,5 +1,6 @@
 import type { PluginProblemTypeDefinition, PluginQuestionTypeDefinition } from "learnharness-plugin-api";
 import type { CodingTests } from "./test-result.ts";
+import { tr } from "./i18n.ts";
 
 export const QUESTION_TYPE_ID = "code";
 export const PROBLEM_TYPE_ID = "code";
@@ -18,7 +19,7 @@ export const practiceInstructions = "When a practice problem calls for writing o
 
 export const definition = {
   id: QUESTION_TYPE_ID,
-  label: "Coding question",
+  label: tr("编程问题", "Coding question"),
   contractVersion: 1,
   showThinking: true,
   questionSchema: {
@@ -62,7 +63,7 @@ export const definition = {
 
 export const problemDefinition = {
   id: PROBLEM_TYPE_ID,
-  label: "Coding problem",
+  label: tr("编程题目", "Coding problem"),
   contractVersion: 1,
   tool: {
     toolName: "coding_problem",

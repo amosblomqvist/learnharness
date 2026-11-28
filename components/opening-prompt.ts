@@ -1,10 +1,11 @@
+import { tr } from "@/src/core";
 /**
  * Same-tab handover of a new session's full opening text. Never put the
  * message in the navigation URL: long query payloads can be rejected before
  * the chat page loads. Storage is required for automatic delivery, not an
  * optional best-effort side effect of navigating away from the source draft.
  */
-export const OPENING_PROMPT_FAILURE = "Couldn’t open the session. Your message is still here. Try sending again.";
+export const OPENING_PROMPT_FAILURE = tr("无法打开会话。你的消息仍保留在这里，请重新发送。", "Couldn’t open the session. Your message is still here. Try sending again.");
 
 export interface OpeningPrompt {
 	text: string;

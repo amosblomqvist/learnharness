@@ -52,7 +52,7 @@ for (const [name, results] of [
 	["invalid error", [{ ...completed(), error: 42 }, completed(1)]],
 	["invalid notice", [{ ...completed(), notice: 42 }, completed(1)]],
 	["missing failure error", [{ ...completed(), ok: false, outcome: "failed" }, completed(1)]],
-] as const) it(`malformed response (${name}) warns to inspect before retrying`, () => { assert.throws(() => parseNotesImportResults({ results }, files), /Check the graph before retrying/); });
+] as const) it(`malformed response (${name}) warns to inspect before retrying`, () => { assert.throws(() => parseNotesImportResults({ results }, files), /请先检查图谱再重试。/); });
 
 it("POST includes captured files and relative identities, preserving provider details", async () => {
 	const file = new File(["two"], "same.md"); Object.defineProperty(file, "webkitRelativePath", { value: "Course/Week/same.md" });
@@ -109,7 +109,7 @@ for (const kind of ["network", "non-JSON", "non-2xx", "malformed", "duplicate in
 		return Response.json({ results: kind === "duplicate index" ? [completed(), completed()] : [] });
 	};
 	await mount(); await submit();
-	const message = kind === "network" ? "synthetic offline" : kind === "non-2xx" ? "Import request failed (HTTP 503): synthetic refused. Check the graph before retrying." : "Invalid import response. Check the graph before retrying.";
+	const message = kind === "network" ? "synthetic offline" : kind === "non-2xx" ? "导入请求失败（HTTP 503）：synthetic refused。请先检查图谱再重试。" : "导入响应无效。请先检查图谱再重试。";
 	assert.deepEqual(current.errors, files.map((file) => `${file.name}: ${message}`));
 	assert.equal(calls, 2); assert.equal(finishes, 1); assert.equal(current.importing, false);
 });
@@ -130,10 +130,10 @@ it("PDF notices and failures survive per-file requests, in selection order", asy
 	await mount(); await submit([new File(["a"], "a.pdf"), new File(["b"], "b.md"), new File(["c"], "c.pdf")]);
 	assert.deepEqual(current.notices, ["c.pdf: Scanned pages may have errors."]); assert.deepEqual(current.errors, ["a.pdf: OCR not supported yet."]);
 });
-for (const [status, error] of [[413, "Too big. Max 25 MB."], [413, "Import request is too large. Select fewer files."], [400, "Could not read the upload. It may be incomplete; please select the files again."]] as const) it(`server refusal remains readable (${error})`, async () => {
+for (const [status, error] of [[413, "文件过大，最大 25 MB。"], [413, "导入请求过大，请少选一些文件。"], [400, "无法读取上传内容，可能不完整，请重新选择文件。"]] as const) it(`server refusal remains readable (${error})`, async () => {
 	globalThis.fetch = async () => Response.json({ results: [], error }, { status });
 	await mount(); await submit();
-	assert.deepEqual(current.errors, files.map((file) => `${file.name}: Import request failed (HTTP ${status}): ${error} Check the graph before retrying.`));
+	assert.deepEqual(current.errors, files.map((file) => `${file.name}: 导入请求失败（HTTP ${status}）：${error}请先检查图谱再重试。`));
 	assert.deepEqual(current.notices, []); assert.equal(current.importing, false);
 });
 it("25 MiB is per file, not per selection; oversized files fail locally while smaller siblings upload", async () => {
@@ -142,7 +142,7 @@ it("25 MiB is per file, not per selection; oversized files fail locally while sm
 	await mount();
 	const half = new Uint8Array(MAX_IMPORT_BYTES / 2 + 1);
 	await submit([new File([new Uint8Array(MAX_IMPORT_BYTES + 1)], "textbook.pdf"), new File([half], "a.pdf"), new File([half], "b.pdf")]);
-	assert.deepEqual(sent, ["a.pdf", "b.pdf"]); assert.deepEqual(current.errors, ["textbook.pdf: Too big. Max 25 MB."]);
+	assert.deepEqual(sent, ["a.pdf", "b.pdf"]); assert.deepEqual(current.errors, ["textbook.pdf: 文件过大，最大 25 MB。"]);
 });
 it("picker stays enabled during imports, offers Files/Folder, and keeps PDF support", () => {
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
@@ -158,16 +158,16 @@ it("graph menu clearly distinguishes extraction from lesson material, above unch
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 	await act(async () => { root!.render(<InteractionLayersProvider><NotesImportControl importing={false} onImportFiles={(files) => selected.push(files)} /></InteractionLayersProvider>); });
 	const trigger = host.querySelector<HTMLButtonElement>('[data-testid="import-notes"]')!;
-	assert.equal(trigger.textContent, "Extract files…");
+	assert.equal(trigger.textContent, "提取文件…");
 	assert.ok(trigger.querySelector(".lucide-waypoints"));
 	await act(async () => { trigger.click(); });
 	const menu = host.querySelector('[role="menu"]')!;
-	assert.equal(menu.getAttribute("aria-label"), "Extract files into the graph");
-	assert.equal(menu.querySelector("p")!.textContent, "For lessons, attach material to a session instead.");
+	assert.equal(menu.getAttribute("aria-label"), "将文件提取到图谱");
+	assert.equal(menu.querySelector("p")!.textContent, "如需用于课程，请改为将资料附加到会话。");
 	assert.equal(menu.getAttribute("aria-describedby"), menu.querySelector("p")!.id);
 	assert.ok(menu.className.includes("w-52"), "compact width wraps the short hint");
-	assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["Files", "Folder"]);
-	assert.equal(menu.firstElementChild!.textContent, "For lessons, attach material to a session instead.");
+	assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["文件", "文件夹"]);
+	assert.equal(menu.firstElementChild!.textContent, "如需用于课程，请改为将资料附加到会话。");
 	const inputs = host.querySelectorAll<HTMLInputElement>('input[type="file"]');
 	let filesClicks = 0, folderClicks = 0;
 	inputs[0]!.click = () => { filesClicks++; }; inputs[1]!.click = () => { folderClicks++; };
@@ -180,8 +180,8 @@ it("graph menu clearly distinguishes extraction from lesson material, above unch
 });
 it("busy graph action names extraction, and preserves the enabled queue picker", () => {
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
-	assert.match(html, /Extracting…/);
-	assert.doesNotMatch(html, /Import notes|Importing…|disabled/);
+	assert.match(html, /提取中…/);
+	assert.doesNotMatch(html, /Import notes|Importing…|导入笔记|导入中…|disabled/);
 });
 
 it("alerts/notices stay plain and escaped", () => {

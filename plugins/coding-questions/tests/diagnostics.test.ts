@@ -30,7 +30,7 @@ for (const [name, valid, invalid] of examples) {
     for (const diagnostic of diagnostics) {
       assert.ok(diagnostic.from >= 0 && diagnostic.from <= diagnostic.to && diagnostic.to <= invalid.length);
       assert.equal(diagnostic.severity, "error");
-      assert.equal(diagnostic.message, "Syntax problem.");
+      assert.equal(diagnostic.message, "语法问题。");
       assert.equal("actions" in diagnostic, false);
       positions.add(`${diagnostic.from}:${diagnostic.to}`);
     }

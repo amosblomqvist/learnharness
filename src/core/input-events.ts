@@ -51,6 +51,7 @@ import {
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { isPluginQuestionJson, type JsonValue, type PluginQuestionOccurrence } from "./plugin-questions.ts";
 import { preparePluginProblemSubmissionImages, type PluginProblemSubmissionImages } from "./plugin-submissions.ts";
+import { tr } from "./i18n.ts";
 
 export type PluginQuestionAnswerInput = { type: "plugin-question-answer"; questionId: string; occurrence: PluginQuestionOccurrence; answer: JsonValue; thinking?: string; readingThinking?: string; images?: PluginSubmissionImages };
 export type PluginProblemSubmissionInput = { type: "plugin-problem-submission"; problemId: string; occurrence: PluginSubmissionOccurrence; submission: JsonValue; thinking?: string; images?: PluginProblemSubmissionImages };
@@ -163,13 +164,13 @@ export function dismissAppends(record: { messages: LhMessage[] }, input: Dismiss
 	if (input.type === "dismiss-problem") {
 		const active = activeProblemOf(record.messages);
 		if (!active || active.toolCallId !== input.problemCallId) {
-			throw new ChatInputError("dismiss-problem input targets no active problem");
+			throw new ChatInputError(tr("当前没有可放弃的题目。", "dismiss-problem input targets no active problem"));
 		}
 		return [newProblemDismissedMarker(input.problemCallId)];
 	}
 	const pending = danglingQuestionOf(record.messages);
 	if (!pending || pending.toolCallId !== input.toolCallId) {
-		throw new ChatInputError("dismiss input targets no pending question call");
+		throw new ChatInputError(tr("当前没有待回答的问题。", "dismiss input targets no pending question call"));
 	}
 	if (input.answer.kind !== toolQuestionKind(pending.tool)) {
 		throw new ChatInputError("dismiss input's answer kind does not match the question");
@@ -187,7 +188,7 @@ export function assertPluginQuestionInputAllowed(messages: readonly LhMessage[],
 	const type = input && typeof input === "object" ? (input as { type?: unknown }).type : undefined;
 	if (type === "plugin-question-answer" || type === "dismiss-plugin-question") return;
 	if (pluginQuestionCallsOf(messages).some(call => call.status === "answerable" || call.status === "unreadable")) {
-		throw new ChatInputError("Answer or dismiss the pending plugin question first");
+		throw new ChatInputError(tr("请先回答或关闭待处理的插件问题", "Answer or dismiss the pending plugin question first"));
 	}
 }
 
@@ -203,14 +204,14 @@ function parseImages(value: unknown): ImageContent[] | undefined {
 	try {
 		const images = validatePluginSubmissionImageArray(value);
 		return images.length ? images : undefined;
-	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submission images"); }
+	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : tr("提交的图片无效", "Invalid submission images")); }
 }
 function parseImageChannels(value: unknown): PluginSubmissionImages | undefined {
 	if (value === undefined) return undefined;
 	try {
 		const images = validatePluginSubmissionImages(value);
 		return Object.keys(images).length ? images : undefined;
-	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submission image channels"); }
+	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : tr("提交的图片通道无效", "Invalid submission image channels")); }
 }
 function parseOptionalOccurrence(value: unknown, images: unknown): PluginSubmissionOccurrence | undefined {
 	if (value !== undefined) return parsePluginQuestionOccurrence(value);
@@ -226,16 +227,16 @@ export function parseChatInput(input: unknown): ChatInput {
 		case "plugin-problem-submission": {
 			if (typeof i.problemId !== "string" || !i.problemId) throw new ChatInputError("plugin-problem-submission requires problemId");
 			if (!isPluginQuestionJson(i.submission)) throw new ChatInputError("plugin-problem-submission requires finite JSON submission");
-			if (i.thinking !== undefined && typeof i.thinking !== "string") throw new ChatInputError("Problem thinking must be text");
+			if (i.thinking !== undefined && typeof i.thinking !== "string") throw new ChatInputError(tr("题目的思考内容必须是文本", "Problem thinking must be text"));
 			let images;
 			try { images = i.images === undefined ? undefined : preparePluginProblemSubmissionImages(i.images); }
-			catch { throw new ChatInputError("Invalid problem submission images"); }
+			catch { throw new ChatInputError(tr("题目提交的图片无效", "Invalid problem submission images")); }
 			return { type: "plugin-problem-submission", problemId: i.problemId, occurrence: parsePluginQuestionOccurrence(i.occurrence), submission: i.submission, ...(i.thinking !== undefined ? { thinking: i.thinking as string } : {}), ...(images ? { images } : {}) };
 		}
 		case "plugin-question-answer": {
 			if (typeof i.questionId !== "string" || !i.questionId) throw new ChatInputError("plugin-question-answer requires questionId");
 			if (!isPluginQuestionJson(i.answer)) throw new ChatInputError("plugin-question-answer requires finite JSON answer");
-			if ((i.thinking !== undefined && typeof i.thinking !== "string") || (i.readingThinking !== undefined && typeof i.readingThinking !== "string")) throw new ChatInputError("Plugin question thinking must be text");
+			if ((i.thinking !== undefined && typeof i.thinking !== "string") || (i.readingThinking !== undefined && typeof i.readingThinking !== "string")) throw new ChatInputError(tr("插件问题的思考内容必须是文本", "Plugin question thinking must be text"));
 			const images = parseImageChannels(i.images);
 			return { type: "plugin-question-answer", questionId: i.questionId, occurrence: parsePluginQuestionOccurrence(i.occurrence), answer: i.answer, ...(i.thinking !== undefined ? { thinking: i.thinking as string } : {}), ...(i.readingThinking !== undefined ? { readingThinking: i.readingThinking as string } : {}), ...(images ? { images } : {}) };
 		}
@@ -312,7 +313,7 @@ export function inputAppends(
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {
-				throw new ChatInputError("answer input targets no pending question call");
+				throw new ChatInputError(tr("当前没有待回答的问题。", "answer input targets no pending question call"));
 			}
 			return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
 		}
@@ -327,9 +328,9 @@ export function inputAppends(
 		case "thinking": {
 			const active = activeProblemOf(record.messages);
 			if (!active || active.toolCallId !== input.problemCallId) {
-				throw new ChatInputError("thinking input targets no active problem");
+				throw new ChatInputError(tr("当前没有进行中的题目。", "thinking input targets no active problem"));
 			}
-			if (active.pluginProblem) throw new ChatInputError("This problem requires its registered submission editor");
+			if (active.pluginProblem) throw new ChatInputError(tr("此题目需要使用其注册的提交编辑器作答", "This problem requires its registered submission editor"));
 			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, input.images)];
 		}
 		case "next": {
@@ -341,7 +342,7 @@ export function inputAppends(
 				throw new ChatInputError("next input is a practice-session affordance");
 			}
 			if (activeProblemOf(record.messages)) {
-				throw new ChatInputError("next input requires no active problem");
+				throw new ChatInputError(tr("请先完成当前题目。", "next input requires no active problem"));
 			}
 			return [...dismissalConclusion(record), newNextMessage()];
 		}
@@ -370,7 +371,7 @@ export function assertNativeSubmissionTarget(messages: readonly LhMessage[], inp
 		if (active?.toolCallId === input.problemCallId) occurrence = active;
 	}
 	if (!occurrence || occurrence.messageId !== input.occurrence.messageId || occurrence.contentIndex !== input.occurrence.contentIndex || occurrence.toolCallId !== input.occurrence.toolCallId || occurrence.toolName !== input.occurrence.toolName) {
-		throw new ChatInputError("Submission target is no longer active. Refresh the session.");
+		throw new ChatInputError(tr("提交目标已失效，请刷新会话。", "Submission target is no longer active. Refresh the session."));
 	}
 }
 
@@ -384,8 +385,8 @@ export function questionRecoveryAppends(
 	assertPluginQuestionInputAllowed(messages, input);
 	const calls = questionCallsOf(messages);
 	const target = calls.find(call => call.messageId === input.messageId && call.contentIndex === input.contentIndex && call.toolCallId === input.toolCallId);
-	if (!target || target.status !== "malformed") throw new ChatInputError("This malformed question is no longer available to retry. Refresh the session.");
-	if (calls.some(call => call.status === "answerable")) throw new ChatInputError("Answer or discard the remaining question before retrying this one.");
+	if (!target || target.status !== "malformed") throw new ChatInputError(tr("这个格式错误的问题已无法重试，请刷新会话。", "This malformed question is no longer available to retry. Refresh the session."));
+	if (calls.some(call => call.status === "answerable")) throw new ChatInputError(tr("请先回答或放弃剩下的问题，再重试这一个。", "Answer or discard the remaining question before retrying this one."));
 	return calls.filter(call => call.status === "malformed").map(call => ({
 		id: newMessageId(), role: "toolResult", toolCallId: call.toolCallId, toolName: call.tool,
 		content: [{ type: "text", text: `Tool call "${call.tool}" could not be displayed as a complete question. The learner requested a replacement, not an answer. Re-issue the question with complete, valid arguments.` }],
@@ -426,11 +427,11 @@ export function retryDrops(messages: readonly LhMessage[]): Set<string> {
 	if (ids.size === 0) {
 		const failure = failedResponseAtEnd(messages);
 		if (failure) {
-			throw new ChatInputError(`${failure.errorMessage ?? "An error occurred."}\n\nThis response cannot be retried after compaction. Send a new message to continue.`);
+			throw new ChatInputError(tr(`${failure.errorMessage ?? "发生错误。"}\n\n上下文压缩后无法重试此回复。请发送一条新消息继续。`, `${failure.errorMessage ?? "An error occurred."}\n\nThis response cannot be retried after compaction. Send a new message to continue.`));
 		}
-		throw new ChatInputError("retry input requires a failed turn to retry");
+		throw new ChatInputError(tr("没有可重试的失败回合。", "retry input requires a failed turn to retry"));
 	}
-	if (!before || before.role === "assistant") throw new ChatInputError("retry input leaves no input to continue from");
+	if (!before || before.role === "assistant") throw new ChatInputError(tr("没有可供继续的输入。", "retry input leaves no input to continue from"));
 	return ids;
 }
 

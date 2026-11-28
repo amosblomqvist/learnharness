@@ -176,10 +176,10 @@ describe("composer attach button", () => {
 
 	it("server render is the browser case: a disabled-looking paperclip between the input and Send", () => {
 		const html = renderToStaticMarkup(<Composer busy={false} value="" onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend={false} />);
-		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="true"|aria-disabled="true"[^>]*aria-label="Attach files"/);
+		assert.match(html, /aria-label="附加文件"[^>]*aria-disabled="true"|aria-disabled="true"[^>]*aria-label="附加文件"/);
 		const editor = html.indexOf("data-file-path-input");
 		const attach = html.indexOf('data-testid="attach-files"');
-		const send = html.indexOf('aria-label="Send"');
+		const send = html.indexOf('aria-label="发送"');
 		assert.ok(editor >= 0 && editor < attach && attach < send, "the paperclip follows the input and precedes Send");
 		assert.ok(html.includes('type="file"') && !html.includes("accept="), "any file type");
 	});
@@ -190,8 +190,8 @@ describe("composer attach button", () => {
 		f.caret(4);
 		await act(async () => { f.button.click(); });
 		assert.equal(f.pickerClicks, 0);
-		assert.deepEqual(Array.from(f.doc.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["Files", "Folder"]);
-		await f.choice("Files");
+		assert.deepEqual(Array.from(f.doc.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["文件", "文件夹"]);
+		await f.choice("文件");
 		assert.equal(f.pickerClicks, 1);
 		const paths = ["/course/week 3.pdf", "/photos/board.jpg"];
 		await f.pick([f.file("week 3.pdf", paths[0]), f.file("board.jpg", paths[1]), f.file("virtual.pdf")]);
@@ -204,7 +204,7 @@ describe("composer attach button", () => {
 		f.caret(4);
 		f.setFolderResult("/course/empty folder");
 		await act(async () => { f.button.click(); });
-		await f.choice("Folder");
+		await f.choice("文件夹");
 		assert.equal(f.value, "read `/course/empty folder/` this");
 		assert.ok(f.doc.querySelector(".lucide-folder"));
 		assert.equal(f.folderCalls, 1);
@@ -220,7 +220,7 @@ describe("composer attach button", () => {
 		f.caret(4);
 		f.setFolderResult(result);
 		await act(async () => { f.button.click(); });
-		await f.choice("Folder");
+		await f.choice("文件夹");
 		assert.equal(f.value, "readthis");
 		assert.equal(f.sends, 0);
 		assert.equal(f.pickerClicks, 0);
@@ -238,7 +238,7 @@ describe("composer attach button", () => {
 		assert.equal(menu.style.bottom, "204px");
 		assert.notEqual(menu.style.visibility, "hidden");
 		f.setFolderResult(new Error("fixture failure"));
-		await f.choice("Folder");
+		await f.choice("文件夹");
 		const notice = f.doc.querySelector<HTMLElement>('[role="status"]')!;
 		assert.equal(notice.parentElement, f.doc.body);
 		assert.equal(dock.contains(notice), false);
@@ -260,15 +260,15 @@ describe("composer attach button", () => {
 		const f = await fixture();
 		f.caret(4);
 		await act(async () => { f.button.click(); });
-		assert.equal(f.doc.activeElement!.textContent, "Files");
+		assert.equal(f.doc.activeElement!.textContent, "文件");
 		assert.equal((await f.key("ArrowDown")).defaultPrevented, true);
-		assert.equal(f.doc.activeElement!.textContent, "Folder");
+		assert.equal(f.doc.activeElement!.textContent, "文件夹");
 		await f.key("ArrowDown");
-		assert.equal(f.doc.activeElement!.textContent, "Files");
+		assert.equal(f.doc.activeElement!.textContent, "文件");
 		await f.key("End");
-		assert.equal(f.doc.activeElement!.textContent, "Folder");
+		assert.equal(f.doc.activeElement!.textContent, "文件夹");
 		await f.key("Home");
-		assert.equal(f.doc.activeElement!.textContent, "Files");
+		assert.equal(f.doc.activeElement!.textContent, "文件");
 		assert.equal((await f.key("Escape")).defaultPrevented, true);
 		assert.equal(f.doc.activeElement, f.button);
 		assert.equal(f.doc.querySelector('[role="menu"]'), null);
@@ -280,7 +280,7 @@ describe("composer attach button", () => {
 	it("cancelled Files selection preserves draft and opens no folder chooser", async () => {
 		const f = await fixture();
 		await act(async () => { f.button.click(); });
-		await f.choice("Files");
+		await f.choice("文件");
 		await f.pick([]);
 		assert.equal(f.value, "readthis");
 		assert.equal(f.folderCalls, 0);

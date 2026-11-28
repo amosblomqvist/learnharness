@@ -36,6 +36,7 @@ import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { isUiLanguage, tr, type UiLanguage } from "./i18n.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
@@ -119,7 +120,7 @@ export interface ModelsNotConfigured {
 }
 export function modelsNotConfigured(missing: ModelSlotName[]): ModelsNotConfigured {
 	return {
-		error: "No model configured — set up your models first",
+		error: tr(MODELS_NOT_CONFIGURED_ZH, MODELS_NOT_CONFIGURED_EN),
 		code: MODELS_NOT_CONFIGURED_CODE,
 		missing,
 	};
@@ -129,8 +130,12 @@ export function modelsNotConfigured(missing: ModelSlotName[]): ModelsNotConfigur
  *  record wording around this prefix; UI consumers detect refused work by
  *  it (info tone, not scary-error) — the envelope's home module owns the
  *  string so the writer and the matcher can never drift. */
+/** Both wordings match: records persist in whichever language was active, and
+ *  the English one is also the model-facing refusal text (job failure steers). */
+const MODELS_NOT_CONFIGURED_ZH = "尚未配置模型——请先设置模型";
+export const MODELS_NOT_CONFIGURED_EN = "No model configured — set up your models first";
 export function isModelsRefusal(error: string | undefined): boolean {
-	return !!error && error.startsWith(modelsNotConfigured([]).error);
+	return !!error && (error.startsWith(MODELS_NOT_CONFIGURED_ZH) || error.startsWith(MODELS_NOT_CONFIGURED_EN));
 }
 /** The typed throw for in-process seams (extraction pipeline): callers
  *  catch it to skip honestly (trigger) or surface the 503 envelope
@@ -164,12 +169,12 @@ export interface ProviderKeyMissing {
 }
 /** The refusal wording's invariant tail — the matcher below keys on it
  * (the label prefix varies by provider). */
-const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
-const CLAUDE_CODE_UNAVAILABLE = "Claude Code is unavailable. Enable and set it up in Settings → Providers.";
+const PROVIDER_KEY_MISSING_TAIL = "API 密钥——请在“设置 → 服务商”中添加";
+const CLAUDE_CODE_UNAVAILABLE = "Claude Code 不可用。请在“设置 → 服务商”中启用并完成设置。";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
-		error: provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
+		error: tr(provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : `未设置 ${label} ${PROVIDER_KEY_MISSING_TAIL}`, providerKeyMissingEn(provider)),
 		code: PROVIDER_KEY_MISSING_CODE,
 		provider,
 		slots,
@@ -179,8 +184,17 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * consumers detect key-refused work by the wording (info tone, not
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
+/** English wording: the en interface, model-facing refusal text (job failure
+ *  steers) and records persisted in English. */
+const PROVIDER_KEY_MISSING_TAIL_EN = "key is set — add one in Settings → Keys";
+const CLAUDE_CODE_UNAVAILABLE_EN = "Claude Code is unavailable. Enable and set it up in Settings → Providers.";
+export function providerKeyMissingEn(provider: string): string {
+	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
+	return provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE_EN : `No ${label} ${PROVIDER_KEY_MISSING_TAIL_EN}`;
+}
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE
+		|| error.endsWith(PROVIDER_KEY_MISSING_TAIL_EN) || error === CLAUDE_CODE_UNAVAILABLE_EN);
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch
@@ -340,6 +354,8 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** Interface (and learner-facing model output) language; applied on relaunch. */
+	language?: UiLanguage;
 }
 
 /** One app-wide dictation preference, shared by every composer. */
@@ -569,8 +585,8 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	agent: { workerRequestConcurrency: 8 },
-	general: { autoUpdate: true },
-	dictation: { language: "en" },
+	general: { autoUpdate: true, language: "zh" },
+	dictation: { language: tr("zh", "en") },
 	appearance: {
 		theme: "default",
 		background: null, // null = the active theme's background
@@ -620,6 +636,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (isUiLanguage(raw.language)) out.language = raw.language;
 	return out;
 }
 

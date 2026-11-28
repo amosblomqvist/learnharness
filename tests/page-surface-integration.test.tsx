@@ -150,11 +150,11 @@ it("plugin loading content is inside the same body boundary while TopBar stays o
 	const region = document.querySelector("[data-session-surface-region]"); assert.ok(region);
 	const body = region.parentElement!;
 	const status = body.querySelector('[role="status"]');
-	assert.ok(status?.textContent?.includes("Loading plugin"));
+	assert.ok(status?.textContent?.includes("正在加载插件"));
 	assert.equal(status?.parentElement?.hasAttribute("data-plugin-view-scroll"), true);
 	assert.ok(status?.parentElement?.classList.contains("overflow-y-auto"));
 	assert.equal(body.querySelector("header"), null);
-	assert.ok(document.querySelector('header [aria-label="Plugin settings"]'));
+	assert.ok(document.querySelector('header [aria-label="插件设置"]'));
 });
 
 it("page boundary expires on exact-path mismatch without disposing preserved plugin DOM", async () => withPage(pages[3]!, async f => {
@@ -236,7 +236,7 @@ it("a pending NewDraft picker becomes the interactive foreground above a later-o
 		assert.ok(pointerOwner, "native picker overrides the surface region's inherited pointer-events:none");
 		assert.equal(pointerOwner.className, "contents pointer-events-auto", "pointer handoff introduces no layout box");
 		assert.ok(pointerOwner.parentElement === findCurrentSurfaceBoundary(f.document)?.stack, "pointer handoff stays inside the shared surface region");
-		const search = picker.querySelector<HTMLInputElement>('[aria-label="Search nodes"]'); assert.ok(search);
+		const search = picker.querySelector<HTMLInputElement>('[aria-label="搜索节点"]'); assert.ok(search);
 		assert.ok(!picker.closest("[inert]"), "late native picker is not covered as ordinary page content");
 		assert.equal(f.controller.isElementEligible(search), true);
 		assert.ok(f.controller.getTopLayer()?.rootRef.current === picker);
@@ -244,7 +244,7 @@ it("a pending NewDraft picker becomes the interactive foreground above a later-o
 		assert.equal(f.controller.isElementEligible(overlayInput), false);
 		await act(async () => { search.focus(); });
 		assert.ok(f.document.activeElement === search);
-		const close = picker.querySelector<HTMLElement>('[aria-label="Close chains"]'); assert.ok(close);
+		const close = picker.querySelector<HTMLElement>('[aria-label="关闭推理链"]'); assert.ok(close);
 		await act(async () => { close.dispatchEvent(new window.Event("click", { bubbles: true })); });
 		assert.equal(f.document.querySelector('[data-testid="chain-table-overlay"]'), null);
 		assert.ok(f.document.querySelector("[data-plugin-session-surface]") === surface);

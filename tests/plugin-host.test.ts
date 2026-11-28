@@ -200,7 +200,7 @@ test("frontend-only assets are explicitly allowlisted, immutable by revision, an
 	const revision = f.host.list()[0]!.revision;
 	fs.writeFileSync(path.join(dir, "main.js"), "export const version = 2");
 	await f.host.refresh();
-	assert.match(f.host.list()[0]!.error!, /Restart required/);
+	assert.match(f.host.list()[0]!.error!, /需要重启/);
 	assert.equal(f.host.list()[0]!.revision, revision);
 	assert.equal(Buffer.from(f.host.asset("example", ["main.js"]).bytes).toString(), "export const version = 1");
 	fs.unlinkSync(path.join(dir, "assets", "image.svg"));
@@ -240,11 +240,11 @@ test("backend edits are restart-only; stale module is not replaced by refresh or
 	fs.writeFileSync(path.join(dir, "backend.cjs"), "throw Error('new code must not execute')");
 	await f.host.refresh();
 	assert.equal(f.host.list()[0]!.revision, revision);
-	assert.match(f.host.list()[0]!.error!, /Restart required/);
+	assert.match(f.host.list()[0]!.error!, /需要重启/);
 	assert.ok(await f.host.call("example", "context"));
 	await f.host.setEnabled("example", false); await f.host.setEnabled("example", true);
 	assert.equal(f.host.list()[0]!.status, "error");
-	assert.match(f.host.list()[0]!.error!, /Restart required/);
+	assert.match(f.host.list()[0]!.error!, /需要重启/);
 });
 
 test("dispose/disable abort cooperative pending activation and disposed host rejects all work", async t => {
@@ -327,7 +327,7 @@ test("an unbuilt project is discovered on its first build without a restart or r
 	await f.host.initialize();
 	assert.match(f.host.list()[0]!.error!, /dist\/manifest\.json/);
 	await f.host.refresh();
-	assert.doesNotMatch(f.host.list()[0]!.error!, /Restart required/, "no code was ever loaded");
+	assert.doesNotMatch(f.host.list()[0]!.error!, /需要重启/, "no code was ever loaded");
 	f.plugin();
 	await f.host.refresh();
 	assert.equal(f.host.list()[0]!.status, "disabled");
@@ -345,7 +345,7 @@ test("symlinked plugin roots and build directories cannot be activated", async t
 		fs.renameSync(from, outside); fs.symlinkSync(outside, from);
 		await f.host.initialize(); await f.host.setEnabled("example", true);
 		assert.equal(f.host.list()[0]!.status, "error", target);
-		assert.match(f.host.list()[0]!.error!, /Unsafe/, target);
+		assert.match(f.host.list()[0]!.error!, /不安全/, target);
 		assert.equal(f.servicesCreated(), 0, target);
 		assert.equal(fs.existsSync(path.join(outside, "data")), false, target);
 	}

@@ -221,11 +221,11 @@ describe("the thinking input", () => {
 	it("400s against a stale or unknown problem call", () => {
 		assert.throws(
 			() => inputAppends({ messages: problemPose() }, { type: "thinking", problemCallId: "call_ghost", text: "x" }),
-			/targets no active problem/,
+			/当前没有进行中的题目。/,
 		);
 		assert.throws(
 			() => inputAppends({ messages: [] }, { type: "thinking", problemCallId: "call_p1", text: "x" }),
-			/targets no active problem/,
+			/当前没有进行中的题目。/,
 		);
 	});
 
@@ -254,7 +254,7 @@ describe("the next input", () => {
 	});
 
 	it("400s while a problem is active (mid-problem input rides the dock)", () => {
-		assert.throws(() => inputAppends({ messages: problemPose(), kind: "practice" }, { type: "next" }), /no active problem/);
+		assert.throws(() => inputAppends({ messages: problemPose(), kind: "practice" }, { type: "next" }), /请先完成当前题目。/);
 	});
 
 	it("rides AFTER a pending dismissal conclusion, exactly like text", () => {
@@ -302,9 +302,9 @@ describe("the dismiss-problem input (ask-style discard)", () => {
 	});
 
 	it("400s when nothing active or a stale id", () => {
-		assert.throws(() => dismissAppends({ messages: [] }, { type: "dismiss-problem", problemCallId: "x" }), /no active problem/);
+		assert.throws(() => dismissAppends({ messages: [] }, { type: "dismiss-problem", problemCallId: "x" }), /当前没有可放弃的题目。/);
 		const concluded = [...problemPose(), ...concludeCall("solved")];
-		assert.throws(() => dismissAppends({ messages: concluded }, { type: "dismiss-problem", problemCallId: "call_p1" }), /no active problem/);
+		assert.throws(() => dismissAppends({ messages: concluded }, { type: "dismiss-problem", problemCallId: "call_p1" }), /当前没有可放弃的题目。/);
 	});
 });
 

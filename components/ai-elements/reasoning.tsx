@@ -27,6 +27,7 @@ import { transformMathDelimiters } from "@/src/core";
 import { streamdownPlugins, streamdownRehypePlugins, streamdownRemend } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
+import { tr } from "@/src/core";
 
 interface ReasoningContextValue {
   isStreaming: boolean;
@@ -136,9 +137,9 @@ export type ReasoningTriggerProps = ComponentProps<
    language; motion (spinner + shimmer) stays the working signal. */
 const defaultGetThinkingMessage = (isStreaming: boolean) => {
   if (isStreaming) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer duration={1}>{tr("思考中…", "Thinking...")}</Shimmer>;
   }
-  return <p>AGENT’S THINKING</p>;
+  return <p>{tr("AI 的思考", "AGENT’S THINKING")}</p>;
 };
 
 export const ReasoningTrigger = memo(
@@ -175,7 +176,7 @@ export const ReasoningTrigger = memo(
                 the component default (h-3) — IDENTICAL to the placeholder
                 spinner (owner, 2026-10-02): the handoff between the two
                 states must be visually seamless, one size everywhere. */}
-            {isStreaming && <BrailleSpinner label="Thinking" />}
+            {isStreaming && <BrailleSpinner label={tr("思考中", "Thinking")} />}
             {getThinkingMessage(isStreaming)}
             <ChevronDownIcon
               className={cn(

@@ -1,293 +1,230 @@
-# Plugin host architecture — API v1
+# 插件宿主架构 — API v1
 
-This is the host-maintainer map. Start with the [authoring guide](plugin-authoring.md)
-for plugin code and use feature contracts for normative public behavior. It describes
-the matching source/build's API v1.
+这是面向宿主维护者的地图。编写插件代码请先阅读[编写指南](plugin-authoring.md)，规范性的公开行为
+以各功能契约为准。本文描述的是与之匹配的源码/构建版本的 API v1。
 
-## Boundaries and ownership
+## 边界与归属
 
-Plugins are trusted local code. Backends execute cooperatively in the existing Node
-server; frontends execute in the application page, not an untrusted iframe. Electron
-renderer isolation and desktop HTTP credential boundaries remain in force, but the
-plugin API is not a filesystem/network sandbox or resource-isolation guarantee.
+插件是受信任的本地代码。后端在现有的 Node 服务器中协作式执行；前端在应用页面中执行，而不是在
+不受信任的 iframe 中。Electron 渲染进程隔离和桌面端 HTTP 凭据边界仍然有效，但插件 API 并不是
+文件系统/网络沙箱，也不保证资源隔离。
 
-The host owns package identity/compatibility, enable state, lifetimes, native session
-contracts, persistence/admission and credential transport. Plugins own feature data,
-prompts, tools, presentation, algorithms and product policy. Official and externally
-installed plugins use the same host/APIs. No special Flashcards, Coding Questions or
-Drawing Pad domain logic belongs in host infrastructure.
+宿主负责插件包的身份/兼容性、启用状态、生命周期、原生会话契约、持久化/准入以及凭据传输。插件负责
+功能数据、提示词、工具、展示、算法和产品策略。官方插件与外部安装的插件使用相同的宿主/API。
+宿主基础设施中不应包含任何专属于 Flashcards、Coding Questions 或 Drawing Pad 的领域逻辑。
 
-Backend learning APIs share native record interpretation and are read-only, not mandatory
-filesystem access control. Cross-file reads are not transactional. Native user-driven
-source management in the knowledge picker is not a programmable graph-write API.
+后端学习数据 API 共用原生记录的解释方式，且是只读的，但并不是强制性的文件系统访问控制。跨文件读取
+不具备事务性。知识选择器中由用户驱动的原生来源管理并不是可编程的图谱写入 API。
 
-## Source map
+## 源码地图
 
-| Boundary | Main implementation |
+| 边界 | 主要实现 |
 | --- | --- |
-| Public browser-safe contracts | `src/core/plugins.ts`, `plugin-ui.ts`, `plugin-agents.ts`, `plugin-workers.ts`, `plugin-questions.ts`, `plugin-problems.ts`, `plugin-submissions.ts`, `plugin-view-context.ts`, `plugin-tree.ts` |
-| Server composition and runtime | `src/server/plugins.ts`, `plugin-host.ts` |
-| Native external backend loading | `scripts/plugin-loader.cjs` |
-| Browser module loading | `public/plugin-loader.js`, `components/plugin-manager.ts`, `plugins.tsx` |
-| Core selection/build staging | `core-plugins.json`, `scripts/build-core-plugins.mjs` |
-| Origin-aware writable data paths | `src/store/plugin-data-paths.ts` |
-| Data/model adapters | `src/server/plugin-learning.ts`, `plugin-inference.ts` |
-| Persistent conversations/tasks | `src/agent/plugin-agents.ts`, `plugin-workers.ts`; `src/store/plugin-agent-records.ts`, `plugin-task-records.ts` |
-| Background result delivery/activity | `src/server/plugin-background-tools.ts`, `plugin-worker-activity.ts` and existing host jobs/steers |
-| Agent tool contributions | Native agent composition plus `src/agent/plugin-question-tools.ts`, `plugin-problem-tools.ts` |
-| Canonical question/problem submission | `src/server/plugin-questions.ts`, `plugin-problems.ts` |
-| Frontend submission preparation | `components/plugin-submission-runner.ts`, `plugin-submission-adapters.ts` |
-| Chrome/controlled UI/settings | `components/plugin-chrome.tsx`, `plugin-ui-host.tsx`, `plugin-settings-rows.tsx` |
-| Surface identity and body coverage | `components/plugin-surface-targets.ts`, `plugin-surfaces.tsx`, `plugin-surface-shell.tsx` |
-| View-local snapshot readers | `components/chat.tsx`, `session-view-readers.ts`, native/custom dock owners |
-| Authoring payload/types | `scripts/build-server.mjs`, `build-plugin-types.mjs` |
+| 公开的浏览器安全契约 | `src/core/plugins.ts`、`plugin-ui.ts`、`plugin-agents.ts`、`plugin-workers.ts`、`plugin-questions.ts`、`plugin-problems.ts`、`plugin-submissions.ts`、`plugin-view-context.ts`、`plugin-tree.ts` |
+| 服务器组装与运行时 | `src/server/plugins.ts`、`plugin-host.ts` |
+| 原生外部后端加载 | `scripts/plugin-loader.cjs` |
+| 浏览器模块加载 | `public/plugin-loader.js`、`components/plugin-manager.ts`、`plugins.tsx` |
+| 核心插件选择/构建暂存 | `core-plugins.json`、`scripts/build-core-plugins.mjs` |
+| 区分来源的可写数据路径 | `src/store/plugin-data-paths.ts` |
+| 数据/模型适配器 | `src/server/plugin-learning.ts`、`plugin-inference.ts` |
+| 持久对话/任务 | `src/agent/plugin-agents.ts`、`plugin-workers.ts`；`src/store/plugin-agent-records.ts`、`plugin-task-records.ts` |
+| 后台结果投递/活动 | `src/server/plugin-background-tools.ts`、`plugin-worker-activity.ts` 以及现有的宿主后台任务/插话 |
+| 智能体工具贡献 | 原生智能体组装，以及 `src/agent/plugin-question-tools.ts`、`plugin-problem-tools.ts` |
+| 规范的问题/题目提交 | `src/server/plugin-questions.ts`、`plugin-problems.ts` |
+| 前端提交准备 | `components/plugin-submission-runner.ts`、`plugin-submission-adapters.ts` |
+| 外壳（chrome）/受控 UI/设置 | `components/plugin-chrome.tsx`、`plugin-ui-host.tsx`、`plugin-settings-rows.tsx` |
+| 界面（surface）身份与主体覆盖 | `components/plugin-surface-targets.ts`、`plugin-surfaces.tsx`、`plugin-surface-shell.tsx` |
+| 视图局部快照读取器 | `components/chat.tsx`、`session-view-readers.ts`、原生/自定义停靠区（dock）的所有者 |
+| 编写用载荷/类型 | `scripts/build-server.mjs`、`build-plugin-types.mjs` |
 
-Bare filenames in a row share the preceding directory. These are implementation seams,
-not supported runtime imports for plugin code.
+同一行中的裸文件名与前一个文件位于同一目录。这些是实现层面的接缝，而不是插件代码可以在运行时导入的受支持模块。
 
-## Package discovery, installation and lifecycle
+## 插件包发现、安装与生命周期
 
-Manifest API version is 1; app/package versions are numeric `x.y.z`. Validate identity,
-paths, compatibility and built entries before executing code. Disabled packages are
-inspected without evaluation. New core and community plugins default to disabled;
-explicit enable/disable choices share `plugins-state.json` and survive app updates.
+manifest 的 API 版本为 1；应用/插件包版本号是数字形式的 `x.y.z`。在执行代码之前，先校验身份、
+路径、兼容性和构建产物入口。被禁用的插件包只做检查，不会执行。新的核心插件和社区插件默认禁用；
+显式的启用/禁用选择共用 `plugins-state.json`，并在应用更新后保留。
 
-Code/data locations are explicit:
+代码/数据的位置都是明确的：
 
-| Purpose | Location |
+| 用途 | 位置 |
 | --- | --- |
-| Authoring projects | Repository `plugins/<id>/` with generated `dist/` |
-| Core code, app-owned/read-only | App `core-plugins/<id>/manifest.json` and flat built assets |
-| Core writable records | `<learning data>/core-plugin-data/<id>/` |
-| Community code | `<learning data>/plugins/<id>/dist/manifest.json` and built assets |
-| Community writable records | `<learning data>/plugins/<id>/data/` |
+| 编写项目 | 仓库中的 `plugins/<id>/`，附带生成的 `dist/` |
+| 核心代码，应用自有/只读 | 应用的 `core-plugins/<id>/manifest.json` 以及扁平的构建资源 |
+| 核心可写记录 | `<learning data>/core-plugin-data/<id>/` |
+| 社区代码 | `<learning data>/plugins/<id>/dist/manifest.json` 以及构建资源 |
+| 社区可写记录 | `<learning data>/plugins/<id>/data/` |
 
-`core-plugins.json` selects Flashcards, Coding Questions, Drawing Pad and Rich Code Blocks.
-`plugins:build-core` builds/stages those packages, assets and licenses before supported
-web/desktop dev and production builds. UI Showcase stays a developer example. Staging
-validates before replacing old generated output; failed builds preserve the previous
-staged tree. `build-server.mjs` requires the exact catalog, copies built core packages
-and removes the exact traced standalone-root `plugins/` authoring tree. It never removes
-runtime modules using broad `plugins`/`dist` globs.
+`core-plugins.json` 选定 Flashcards、Coding Questions、Drawing Pad 和 Rich Code Blocks。
+在受支持的 Web/桌面端开发构建与生产构建之前，`plugins:build-core` 会构建/暂存这些插件包、资源和
+许可证。UI Showcase 仍只是开发者示例。暂存会先校验再替换旧的生成输出；构建失败时保留之前暂存的目录树。
+`build-server.mjs` 要求目录清单完全一致，复制构建好的核心插件包，并精确移除被追踪的独立根目录下的
+`plugins/` 编写目录树。它绝不会使用宽泛的 `plugins`/`dist` 通配模式移除运行时模块。
 
-The host loads core code directly; there is no startup copying/install journal or data
-migration. Provenance is host-owned `PluginInfo.origin`, not manifest metadata. Core IDs
-remain reserved when a package is missing/corrupt; community collisions are skipped and
-reported separately without changing files or blocking the legitimate core package.
-Shared corrupt enable metadata is refused rather than overwritten.
+宿主直接加载核心代码；没有启动时复制/安装日志，也没有数据迁移。来源信息是宿主自有的
+`PluginInfo.origin`，而不是 manifest 元数据。插件包缺失/损坏时，核心 ID 仍然保留；社区插件的冲突会被
+跳过并单独报告，不会修改文件，也不会阻止合法的核心插件包。共享的启用元数据损坏时会拒绝使用，而不是覆盖它。
 
-Electron sets `LH_DATA_DIR` to `<Electron userData>/data`; on macOS this is
-`~/Library/Application Support/LearnHarness/data/`. Ordinary development defaults to
-repository `data/`. Backend activation and disabled-package task recovery use the same
-origin-aware writable path resolver; neither falls back to old community copies of core
-data. Recovery never executes plugin code or creates missing data directories.
+Electron 把 `LH_DATA_DIR` 设为 `<Electron userData>/data`；在 macOS 上即
+`~/Library/Application Support/LearnHarness/data/`。普通开发环境默认使用仓库中的 `data/`。后端激活和
+已禁用插件包的任务恢复使用同一个区分来源的可写路径解析器；二者都不会回退到旧的核心数据社区副本。
+恢复过程绝不执行插件代码，也不会创建缺失的数据目录。
 
-Refresh discovers manual folders/first builds; admitted code changes require a server
-restart. There is no hot replacement, separate development registration, runtime npm
-installation, root-manifest fallback or automatic community updater. Build cleanup must
-never reach sibling data or follow symlinked/misplaced data inside build output.
+刷新可以发现手动放入的文件夹/首次构建；已接纳的代码发生变更后需要重启服务器。没有热替换、单独的
+开发注册、运行时 npm 安装、根目录 manifest 回退或自动社区更新器。构建清理绝不能触及同级数据，
+也不能跟随构建输出中符号链接/位置错误的数据。
 
-Backend activation is server-owned, frontend activation window-owned, view mounts
-independently scoped. Abort and returned/registered cleanup revoke owned registrations,
-widgets and cooperative work; async late results are fenced by instance/generation.
-Module caching lasts until restart, so top-level side effects are not lifecycle-owned.
-Navigation does not disable a plugin or stop its server-side tasks.
+后端激活归服务器所有，前端激活归窗口所有，视图挂载各自独立限定作用域。中止以及返回/注册的清理会撤销
+其拥有的注册、组件和协作式工作；异步的迟到结果按实例/代次（generation）隔离。模块缓存一直持续到重启，
+因此顶层副作用不受生命周期管理。导航不会禁用插件，也不会停止其服务器端任务。
 
-Only declared frontend/style entries and `assets/` are publicly served, never backend
-code or persistent data. The frontend JSON operation bridge routes to the owning
-backend's registered handlers; it is not an arbitrary router. Document conversion uses
-a separate bounded multipart path, not that JSON bridge.
+只有声明的前端/样式入口和 `assets/` 会被公开提供，后端代码和持久数据绝不会。前端 JSON 操作桥接会路由到
+所属后端已注册的处理函数；它不是任意路由器。文档转换使用单独的有界 multipart 路径，而不是这个 JSON 桥接。
 
-## Frontend presentation and interaction
+## 前端展示与交互
 
-The host owns view shells, titles, top-bar overflow and settings gear. Views mount only
-feature bodies. Registering actions/views creates no implicit navigation: placements
-explicitly target sidebar, graph or selected session/plugin-view top bars. Async action
-busy/repeat/error handling is host-owned. Each enabled plugin has its own Settings page;
-package management is split between Settings → Core plugins and Community plugins.
-Core management omits installation/trust preambles, directory, refresh and routine
-versions; community management retains them and shows reserved-ID conflicts.
+宿主负责视图外壳、标题、顶栏溢出菜单和设置齿轮。视图只挂载功能主体。注册操作/视图不会产生隐式导航：
+放置会显式地指向侧边栏、图谱或所选会话/插件视图的顶栏。异步操作的忙碌/重复/错误处理由宿主负责。
+每个已启用的插件都有自己的设置页面；插件包管理分为 **设置 → 核心插件** 和 **社区插件** 两处。
+核心插件管理省略安装/信任前言、目录、刷新和常规版本信息；社区插件管理保留这些内容，并显示保留 ID 冲突。
 
-`ctx.ui` exposes controlled helpers rather than React/private component access.
-Handles shallow-update props, dispose idempotently and follow their mount signals.
-Values/persistence remain plugin-owned; selectors never mutate core model defaults.
-Generic badges/colors do not interpret grades. `mountMarkdown` uses the actual host
-pipeline with built-ins only, without auxiliary controls or plugin fence dispatch.
-`mountTree` shares presentation/navigation primitives with Chains, not its domain
-controller; callers own hierarchy/selection, sufficient width and scrolling.
+`ctx.ui` 提供的是受控的辅助方法，而不是对 React/私有组件的访问。句柄对 props 做浅更新，可幂等地释放，
+并遵循其挂载信号。值/持久化仍归插件所有；选择器绝不会修改核心模型的默认值。通用徽标/颜色不解释评分。
+`mountMarkdown` 使用实际的宿主渲染管线，只启用内置功能，不带辅助控件，也不派发插件代码围栏。
+`mountTree` 与推理链（Chains）共用展示/导航原语，但不共用其领域控制器；调用方负责层级/选择、足够的宽度和滚动。
 
-Dialogs, menus, pickers and page-body surfaces use the shared interaction controller;
-see [dialog/overlay rules](dialog-overlay-contract.md). One Escape has one owner,
-covered content cannot receive native submit/dictation actions, and eligible focus is
-restored without focusing detached/covered controls. Browser Tab navigation remains
-unchanged. Declarative action shortcuts use `src/core/plugin-shortcuts.ts` for validation,
-static scope-overlap/conflict resolution, and `components/plugin-shortcuts.tsx` for
-route-keyed page readers and eligible dispatch through the existing action runner.
-Shortcut metadata is captured at registration; dynamic disabled state stays live.
-The existing `lh:keymap` store, Keyboard Settings and cheat sheet include plugin actions.
-The interaction controller snapshots original foreground ownership at key capture;
-only the same owner's page-body surfaces allow a plugin action through. UI factories
-receive host-supplied plugin identity for this check, never author-supplied surface props.
-See [action shortcuts](plugin-authoring.md#action-shortcuts) for the public contract.
+对话框、菜单、选择器和页面主体界面使用共享的交互控制器；参见[对话框/浮层规则](dialog-overlay-contract.md)。
+一次 Escape 只有一个所有者，被覆盖的内容无法接收原生的提交/语音听写操作，焦点会恢复到符合条件的位置，
+而不会聚焦已分离/被覆盖的控件。浏览器的 Tab 导航保持不变。声明式操作快捷键使用
+`src/core/plugin-shortcuts.ts` 进行校验和静态的作用域重叠/冲突解析，使用
+`components/plugin-shortcuts.tsx` 提供按路由键控的页面读取器，并通过现有的操作运行器进行符合条件的派发。
+快捷键元数据在注册时捕获；动态的禁用状态保持实时。现有的 `lh:keymap` 存储、键盘设置（Keyboard Settings）
+和速查表都包含插件操作。交互控制器在按键捕获时对原始的前台归属做快照；只有同一所有者的页面主体界面
+才会放行插件操作。UI 工厂会收到宿主提供的插件身份用于此项检查，而绝不使用作者提供的界面 props。
+公开契约参见[操作快捷键](plugin-authoring.md#动作快捷键)。
 
-Knowledge pickers capture opening origin. Page/surface origins use a main-pane view;
-modal/Settings origins use a full-viewport modal with the parent still painted/inert.
-Origin/widget lifetime and pending-load invalidation prevent stale graph loads from
-opening on a successor view. Existing user source organization stays host-owned.
+知识选择器会捕获打开它的来源位置。从页面/界面打开时使用主窗格视图；从模态框/设置打开时使用全视口模态框，
+父级仍保持绘制且不可交互（inert）。来源位置/组件的生命周期以及待加载的失效机制，可防止过期的图谱加载在
+后继视图上打开。用户现有的来源组织方式仍由宿主负责。
 
-Page-body surfaces capture one live boundary (targetless) or use an explicit opaque
-native target. Top bar/sidebar remain usable. Covered pages/surfaces remain mounted;
-ordinary stack siblings do not acquire each other's lifetimes. Navigation expires
-boundaries; tokens never revive on return. Dialogs/Settings remain in front regardless
-of opening order. Titles are accessible names, not forced visible headings. See the
-[surface contract](plugin-session-extension-contract.md#8-public-surface-contract).
+页面主体界面要么捕获一个实时边界（无目标），要么使用显式的不透明原生目标。顶栏/侧边栏仍可使用。
+被覆盖的页面/界面保持挂载；普通的堆叠同级之间不会继承彼此的生命周期。导航会使边界过期；令牌在返回时
+绝不会复活。无论打开顺序如何，对话框/设置始终位于前面。标题是无障碍名称，而不是强制可见的标题元素。
+参见[界面契约](plugin-session-extension-contract.md#8-公开覆盖层契约)。
 
-## Agent contributions and native input authority
+## 智能体贡献与原生输入的权威性
 
-Native instructions/tools, question types and problem types are admitted once per turn
-as a package-atomic loadout. Core names remain reserved. Sorted package admission never
-overwrites collisions; a bad package contributes nothing for that turn and gets a
-visible warning without losing its unrelated backend/view. Captured tool executions
-are revocable; unregister affects future loadouts. Native calls/results use the existing
-runner/history, not a plugin-specific conversation framework.
+原生指令/工具、问题类型和题目类型每个回合以插件包为原子单位作为一套装载（loadout）被接纳一次。
+核心名称保持保留。按排序进行的插件包准入绝不会覆盖冲突；有问题的插件包在该回合不贡献任何内容，并会
+显示一条可见警告，但不会失去其无关的后端/视图。已捕获的工具执行可以撤销；取消注册只影响之后的装载。
+原生调用/结果使用现有的运行器/历史记录，而不是插件专用的对话框架。
 
-Teaching questions and practice problems deliberately use different native authorities:
+教学问题和练习题目有意使用不同的原生权威机制：
 
-- **Questions:** a frozen per-turn registry and pose ledger attest successful execution.
-  App-only `lhQuestions` metadata binds saved contracts to exact assistant occurrences;
-  raw tool names/arguments/results do not create pending authority. Temporary pose acks
-  are suppressed; canonical adoption gates actionable editors. Saved schemas/refinement/
-  grading requirements govern answers. Validate → optional grade → save → continue;
-  grading observations/errors do not fabricate native correctness. Required unavailable
-  implementations keep pending input unavailable. See the [question contract](plugin-question-contract.md).
-- **Practice:** accepted pose acknowledgement details contain `pluginProblem`; native
-  acknowledgements already persist, so no second question ledger is needed. Native and
-  plugin poses share one active-problem gate and the existing `conclude` assessment.
-  Each submission validates, optionally processes, saves observations and continues.
-  Missing/incompatible implementations leave the problem active but unavailable, with
-  native dismissal; no text-editor fallback. See the [problem contract](plugin-problem-contract.md).
+- **问题：** 冻结的每回合注册表和出题（pose）账本证明执行成功。仅限应用的 `lhQuestions` 元数据
+  把已保存的契约绑定到确切的助手消息出现位置；原始工具名/参数/结果不会产生待处理的权威。临时的出题
+  确认会被抑制；规范采纳是可操作编辑器的前提关卡。已保存的 schema/细化/评分要求约束答案。
+  流程为：校验 → 可选的评分 → 保存 → 继续；评分的观察结果/错误不会伪造原生的正确性判定。
+  必需的实现不可用时，待处理输入保持不可用。参见[问题契约](plugin-question-contract.md)。
+- **练习：** 已接受的出题确认详情中包含 `pluginProblem`；原生确认本身已经持久化，因此不需要第二个
+  问题账本。原生出题与插件出题共用同一个活动题目关卡和现有的 `conclude` 评估。每次提交都会校验、
+  可选地处理、保存观察结果并继续。实现缺失/不兼容时，题目保持活动但不可用，并提供原生的关闭操作；
+  不会回退到文本编辑器。参见[题目契约](plugin-problem-contract.md)。
 
-Grading/processing run inside the existing inline turn-preparation owner, not a new job,
-queue or model pass. Identity/registration checks after awaits prevent late saves.
-Explicit Stop/revocation aborts cooperatively and retains ownership until the callback
-settles. HTTP disconnect/navigation alone does not cancel admitted server work. Historical
-projection/retry/remount never recomputes saved grading/processing.
+评分/处理在现有的内联回合准备所有者中运行，而不是新的后台任务、队列或模型轮次。await 之后的身份/
+注册检查可防止迟到的保存。显式的停止/撤销会协作式地中止，并在回调结束前保留归属。仅 HTTP 断开/导航
+不会取消已接纳的服务器工作。历史投影/重试/重新挂载绝不会重新计算已保存的评分/处理结果。
 
-## Submission preparation, images and view snapshots
+<a id="submission-preparation-images-and-view-snapshots"></a>
+## 提交准备、图片与视图快照
 
-One frontend preparation runner captures target occurrence, ordered interceptors and
-original dictation destination before awaits. It freezes detached context/input,
-serially transforms learner values, rechecks ownership, then uses native POST/steer
-admission. Preparation cancellation/failure preserves drafts; accepted delivery clears
-only captured revisions. The lease ends at acknowledgment/refusal, not model-stream end,
-so ordinary busy steering remains possible.
+一个前端准备运行器会在任何 await 之前捕获目标出现位置、有序的拦截器以及原始的语音听写目标。
+它冻结分离的上下文/输入，串行地转换学习者的值，重新检查归属，然后使用原生的 POST/插话准入。
+准备被取消/失败时保留草稿；投递被接受后只清除已捕获的修订版本。租约在确认/拒绝时结束，而不是在模型流
+结束时，因此普通的忙碌时插话仍然可行。
 
-Acceptance callbacks are live/best-effort, not durable transactions. Lost acknowledgments
-never authorize clearing plugin material. Model retries reuse saved transformed input;
-internal steer-to-send fallback does not intercept twice. Builtin derived answers are
-rebuilt by the host from captured native question data, not spread from plugin fields.
-Plugin JSON remains subject to canonical saved schemas. See [session extensions](plugin-session-extension-contract.md).
+接受回调是实时/尽力而为的，而不是持久事务。丢失的确认绝不会授权清除插件材料。模型重试会复用已保存的
+转换后输入；内部从插话回退为发送时不会二次拦截。内置的派生答案由宿主根据捕获的原生问题数据重建，
+而不是从插件字段展开而来。插件 JSON 仍受规范的已保存 schema 约束。参见[会话扩展](plugin-session-extension-contract.md)。
 
-Explicit native image blocks travel through existing byte/MIME, effective-model capability
-and resize admission. Persisted normalized images reach both UI and model channels;
-paths are not implicitly read, and base64 is not inserted into JSON answer strings.
-Existing optimistic/canonical reconciliation prevents duplicate previews while preserving
-uncertain drafts. No image asset store or broad provider/model-switch redesign is added.
+显式的原生图片块会经过现有的字节/MIME、实际生效模型的能力以及尺寸调整准入。持久化的规范化图片会同时
+进入 UI 和模型通道；路径不会被隐式读取，base64 也不会插入 JSON 答案字符串中。现有的乐观/规范对账机制
+在保留不确定草稿的同时防止重复预览。不会新增图片资源存储，也不会对服务商/模型切换进行大范围重新设计。
 
-Session top-bar `context.view` is a detached/frozen whole-session snapshot captured at
-invocation. It reuses current browser messages, projected transcript and view-local
-input readers; native/custom dock owners expose actual presentation/drafts without
-DOM inspection, another history parser or a global store. Reads never save, flush speech,
-reveal, process or submit. Data stays bound across awaits; opaque targets keep their live
-lifetimes. Disabled predicates use lazy render snapshots; clicks capture afresh through
-the action error boundary. See [view context](plugin-view-context.md).
+会话顶栏的 `context.view` 是在调用时捕获的、已分离/冻结的整个会话快照。它复用当前浏览器消息、投影的
+对话记录以及视图局部输入读取器；原生/自定义停靠区的所有者会暴露实际的展示/草稿，无需检查 DOM、
+另一个历史解析器或全局存储。读取绝不会保存、刷出语音、揭示、处理或提交。数据在 await 之间保持绑定；
+不透明目标保持其实时生命周期。禁用判定使用延迟的渲染快照；点击会通过操作错误边界重新捕获。
+参见[视图上下文](plugin-view-context.md)。
 
-## Inference, persistent work and recovery
+<a id="inference-persistent-work-and-recovery"></a>
+## 推理、持久工作与恢复
 
-`plugin-inference.ts` reuses host model/provider admission, consent, cancellation and
-usage attribution. Catalog selection and purpose are explicit; no credential DTO,
-custom transport or silent key fallback is exposed.
+`plugin-inference.ts` 复用宿主的模型/服务商准入、授权同意、取消和用量归属。目录选择和用途（purpose）
+都是显式的；不暴露凭据 DTO、自定义传输或静默的密钥回退。
 
-Managed agents persist native interactive conversations and pending external inputs under
-plugin data. Definitions are reconstructed by activation, not serialized handlers.
-Request IDs distinguish retries from new actions. Restart recovers waiting input and
-marks in-flight runs interrupted; navigation merely detaches observers.
+托管智能体把原生交互式对话和待处理的外部输入持久化在插件数据下。定义由激活过程重建，而不是序列化的
+处理函数。请求 ID 用于区分重试与新操作。重启会恢复等待中的输入，并把进行中的运行标记为已中断；
+导航只是分离观察者。
 
-Result workers persist accepted input/configuration, native progress and a terminal
-validated outcome under `data/tasks/`. First durable valid result wins, including falsy
-JSON; cancellation cannot replace it. Disable/restart interrupts all unfinished work,
-including queued tasks. Recovery never replays arbitrary tools.
+结果 worker 把已接受的输入/配置、原生进度以及最终的已校验结果持久化在 `data/tasks/` 下。第一个持久
+且有效的结果胜出，包括 JSON 中的假值；取消无法替换它。禁用/重启会中断所有未完成的工作，包括排队中的任务。
+恢复绝不会重放任意工具。
 
-`createBackgroundTool` returns a native dispatch ack and links a generic host job.
-Worker outcome and later delivery are separate durable facts: persist generic outcome
-before async formatting, use existing wake/steer gates and deterministic delivery IDs,
-and retain readable fallback when formatting/plugin availability fails. Restart re-delivers
-persisted results, not formatters/tools. A finished worker's pending delivery is not
-canceled by END. Plugin renderers replace only the result body, not host identity/status/errors.
+`createBackgroundTool` 返回原生的派发确认，并关联一个通用的宿主后台任务。worker 结果与之后的投递是
+两个独立的持久事实：在异步格式化之前持久化通用结果，使用现有的唤醒/插话关卡和确定性的投递 ID，
+并在格式化/插件不可用失败时保留可读的回退内容。重启会重新投递已持久化的结果，而不是格式化器/工具。
+已完成 worker 的待处理投递不会被 END 取消。插件渲染器只替换结果主体，不替换宿主的身份/状态/错误。
 
-One process-global FIFO admission pool limits background **model streams**, releasing
-permits before tools/child waits. It covers native background workers and all detached
-plugin workers, not direct teaching/practice/compaction, interactive managed conversations
-or raw plugin inference. `agent.workerRequestConcurrency` defaults to 8, accepts positive
-safe integers and updates live. Purpose governs subscription consent, not pool membership.
-Standalone worker activity uses Background agents without duplicating linked-job rows.
+一个进程全局的 FIFO 准入池限制后台**模型流**的数量，在工具/子任务等待之前释放许可。它覆盖原生后台
+worker 和所有分离的插件 worker，但不包括直接的教学/练习/上下文压缩、交互式托管对话或原始插件推理。
+`agent.workerRequestConcurrency` 默认为 8，接受正的安全整数，并实时更新。用途决定订阅授权同意，
+而不决定是否纳入池中。独立的 worker 活动使用“后台智能体”（Background agents），不会重复已关联任务的行。
 
-The existing per-window app notification connection carries availability/app events and
-namespaced plugin messages. It is not a durable arbitrary-event log. Reconnect invokes
-resync callbacks; observers fetch current snapshots and release subscriptions on cleanup.
+现有的每窗口应用通知连接承载可用性/应用事件以及带命名空间的插件消息。它不是持久的任意事件日志。
+重新连接会调用重新同步回调；观察者获取当前快照，并在清理时释放订阅。
 
-## Testing
+<a id="testing"></a>
+## 测试
 
-Maintain tests at each actual boundary:
+在每个实际边界维护测试：
 
-- Manifest/path guards, disabled discovery, enable/disable cleanup and revocation.
-- Direct core loading, disabled defaults/persisted choices, reserved-ID collisions,
-  isolated writable data paths/recovery and complete source-free core payloads.
-- Native loadout collision atomicity, canonical pose authority, exact occurrences,
-  schema compatibility, mixed tool batches and stale submission rejection.
-- Inline grading/processing ownership, Stop/revocation, write-before-continuation,
-  compaction joins and no recomputation on replay.
-- Editor lease generations, async cleanup/StrictMode, draft retention, keyboard/IME,
-  dictation destination, missing-renderer fallback and image placement.
-- Submission interception/acknowledgment races and snapshot freshness/immutability,
-  including real input owners and inline/overflow top-bar actions.
-- Durable agent/task state, accepted-result preservation and fallback delivery recovery.
-- Portable SDK compilation and curated authoring docs/examples/type payload.
-- Complete generated API-reference coverage and canonical official-source export fidelity.
+- manifest/路径守卫、已禁用插件的发现、启用/禁用时的清理以及撤销。
+- 核心插件的直接加载、默认禁用/已持久化的选择、保留 ID 冲突、隔离的可写数据路径/恢复，以及完整且不含源码的核心载荷。
+- 原生装载冲突的原子性、规范的出题权威、确切的出现位置、schema 兼容性、混合工具批次以及过期提交的拒绝。
+- 内联评分/处理的归属、停止/撤销、先写入后继续、上下文压缩的汇合以及重放时不重新计算。
+- 编辑器租约代次、异步清理/StrictMode、草稿保留、键盘/输入法（IME）、语音听写目标、缺失渲染器的回退以及图片放置。
+- 提交拦截/确认的竞态以及快照的新鲜度/不可变性，包括真实的输入所有者和内联/溢出菜单中的顶栏操作。
+- 持久的智能体/任务状态、已接受结果的保留以及回退投递的恢复。
+- 可移植的 SDK 编译以及精选的编写文档/示例/类型载荷。
+- 生成的 API 参考完整覆盖，以及规范的官方源码导出保真度。
 
-Run root tests/typecheck/lint and relevant plugin tests. Production checks additionally
-needs a clean-checkout build, curated standalone/privacy audit and isolated packaged
-runtime/browser checks; passing component fixtures is not packaged-app proof. Use
-throwaway learner/auth directories and loopback providers rather than live accounts or
-replacing the installed app. Relevant tools include `build-plugin-types.mjs`,
-`build-server.mjs`, `smoke-plugin-runtime.mjs`, `smoke-plugin-browser.mjs` and
-`smoke-server.mjs` under `scripts/`.
+运行根目录的测试/类型检查/lint 以及相关的插件测试。生产检查还需要干净检出的构建、精选的独立/隐私审计
+以及隔离的打包运行时/浏览器检查；组件测试夹具通过并不能证明打包后的应用正常。请使用一次性的学习者/认证
+目录和回环服务商，而不是真实账户，也不要替换已安装的应用。相关工具包括 `scripts/` 下的
+`build-plugin-types.mjs`、`build-server.mjs`、`smoke-plugin-runtime.mjs`、`smoke-plugin-browser.mjs` 和
+`smoke-server.mjs`。
 
-### Maintaining the authoring reference
+### 维护编写参考
 
-The [API reference](plugin-api/README.md) is generated Markdown, not a second hand-written
-schema. Edit canonical public-contract JSDoc and behavioral guides, then regenerate from
-the matching declarations in a source checkout with its existing dependencies:
+[API 参考](plugin-api/README.md)是生成的 Markdown，而不是第二份手写的 schema。请编辑规范的公开契约
+JSDoc 和行为指南，然后在带有现有依赖的源码检出中，根据匹配的声明重新生成：
 
 ```sh
 node scripts/build-plugin-types.mjs dist/plugin-sdk
 node scripts/build-plugin-api-reference.mjs dist/plugin-sdk docs/plugin-api
 ```
 
-`tests/plugin-api-reference.test.ts` independently inventories SDK exports and checks
-the committed reference against fresh generation, including overloads, nested methods
-and referenced local supporting types. Context methods are callable host capabilities;
-the type-only SDK does not expose the host's implementation helpers at runtime.
+`tests/plugin-api-reference.test.ts` 会独立清点 SDK 导出，并将已提交的参考与新生成的结果对照检查，
+包括重载、嵌套方法以及引用的本地辅助类型。上下文方法是可调用的宿主能力；仅含类型的 SDK 不会在运行时
+暴露宿主的实现辅助函数。
 
-`npm run plugins:build-authoring` generates its reference directly from the staged SDK
-and exports the canonical official projects without their local builds/dependencies/data.
-Bundle tests check source-file identity, privacy/path admission, deterministic archives
-and self-contained links. Keep the API reference, [example map](plugin-examples.md) and
-project README instructions consistent when adding a capability or source example.
+`npm run plugins:build-authoring` 直接根据暂存的 SDK 生成参考，并导出规范的官方项目（不含其本地构建/
+依赖/数据）。打包测试会检查源文件身份、隐私/路径准入、确定性归档以及自包含的链接。新增能力或源码示例时，
+请保持 API 参考、[示例地图](plugin-examples.md)和项目 README 说明的一致性。
 
-## Non-goals
+## 非目标
 
-No sandbox/per-plugin process, marketplace/community updater, hot replacement,
-programmable core-data writes, generic forms/UI or raw keyboard-event framework, persistent arbitrary
-editor drafts, or automatic replay/exactly-once external effects. Host infrastructure
-must not choose plugin product prompts, algorithms, defaults or deletion policy.
+不提供：沙箱/每插件独立进程、插件市场/社区更新器、热替换、可编程的核心数据写入、通用表单/UI 或原始
+键盘事件框架、持久的任意编辑器草稿，以及自动重放/恰好一次的外部副作用。宿主基础设施不得替插件选择
+产品提示词、算法、默认值或删除策略。

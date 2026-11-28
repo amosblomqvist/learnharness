@@ -5,6 +5,7 @@ import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { canMoveFolder, type OrganizationAction, type SourceFolder, type SourceOrganization } from "@/src/core";
 import { EditableSourceName, SOURCE_DRAG_TYPE, SourceDragRow } from "@/components/source-folder-tree";
 import { cn } from "@/lib/utils";
+import { tr } from "@/src/core";
 
 /**
  * Session-sidebar folders (approved plan): the shared source organization
@@ -125,7 +126,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 				</div>
 			) : (
 				<button type="button" data-testid={`sidebar-folder-${folder.id}`} aria-expanded={open}
-					aria-label={`${open ? "Collapse" : "Expand"} folder ${folder.name}`}
+					aria-label={tr(`${open ? "折叠" : "展开"}文件夹 ${folder.name}`, `${open ? "Collapse" : "Expand"} folder ${folder.name}`)}
 					onClick={onToggle} onContextMenu={onContextMenu}
 					className={cn("flex w-full items-center gap-1 pr-3 text-left hover:bg-accent", compact ? SIDEBAR_COMPACT_ROW : "py-1.5")}
 					style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>

@@ -71,7 +71,7 @@ synthetic learning profile for development, not real installed plugins or record
 - **Directory / tree** is a small synthetic fixture rendered by `mountTree`, not a source-management view. Both folders start expanded. The same **Shared item** has a distinct occurrence key in each folder; selection is independent, including parent rows, and never cascades. **Enable selection** shows host checkboxes; **Disable selection** hides them without clearing values. Click a row for the host's arrow/row navigation and use Space for an enabled host checkbox. The **Directory draft** input keeps its editing keys; its local value survives collapse/re-expand through a stable content factory. Reset clears selection and draft and expands both folders without changing siblings. The compact **Kind**/**State** columns are host-rendered; the caller owns the horizontal scroller and 36rem minimum width, not a responsive layout engine. Nothing is persisted.
 - Knowledge selection is also available inside an ordinary dialog and the parent surface. Page/surface origins use a main-pane view that leaves the sidebar visible and interactive; a dialog/Settings origin uses a full-viewport modal. Leaving an originating page closes its picker. A live modal's picker belongs to that modal, not an unrelated background route.
 
-See the [surface contract](../../docs/plugin-session-extension-contract.md#8-public-surface-contract)
+See the [surface contract](../../docs/plugin-session-extension-contract.md#8-公开覆盖层契约)
 for targetless and explicit-target lifecycle rules; these are overloads of one method,
 not separate UI families.
 

@@ -68,7 +68,7 @@ const byTest = (id: string) => {
 	assert.ok(element, `missing ${id}`); return element;
 };
 async function arm() { await act(async () => byTest("kbd-rebind-find").click()); }
-const isArmed = () => byTest("kbd-row-find").textContent!.includes("Press keys…");
+const isArmed = () => byTest("kbd-row-find").textContent!.includes("请按键…");
 afterEach(async () => {
 	await act(async () => root?.unmount()); root = undefined;
 	// Flush HostDialog/FocusScope cleanup before restoring this fixture's DOM.

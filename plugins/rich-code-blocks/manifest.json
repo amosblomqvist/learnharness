@@ -7,5 +7,11 @@
   "description": "Static chemical structures, musical notation and technical diagrams from SMILES, ABC and TikZ code blocks.",
   "main": "main.js",
   "backend": "backend.cjs",
-  "styles": "styles.css"
+  "styles": "styles.css",
+  "locales": {
+    "zh": {
+      "name": "富代码块",
+      "description": "将 SMILES、ABC 和 TikZ 代码块渲染为静态的化学结构、乐谱和技术图表。"
+    }
+  }
 }

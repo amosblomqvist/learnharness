@@ -15,6 +15,7 @@ import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-sig
 import { useModelCatalog } from "@/components/model-catalog";
 export { useModelCatalog } from "@/components/model-catalog";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
+import { tr } from "@/src/core";
 
 /** provider:id → known contextWindow over the cached catalog, mirroring
  * the server's catalogContextLimits join. CLI aliases have no global
@@ -153,7 +154,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				});
 				if (!res.ok) {
 					const body = (await res.json().catch(() => ({}))) as { error?: string };
-					setError(body.error ?? `settings rejected (${res.status})`);
+					setError(body.error ?? tr(`设置被拒绝（${res.status}）`, `settings rejected (${res.status})`));
 					return;
 				}
 				// Server truth, never the request body (fix wave): a pick
@@ -166,7 +167,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				setOpen(null);
 				notifySettingsSaved("models");
 			} catch {
-				setError("Could not reach the server — try again.");
+				setError(tr("无法连接服务器 — 请重试。", "Could not reach the server — try again."));
 			}
 		},
 		[],
@@ -188,14 +189,14 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				});
 				if (!res.ok) {
 					const body = (await res.json().catch(() => ({}))) as { error?: string };
-					setError(body.error ?? `settings rejected (${res.status})`);
+					setError(body.error ?? tr(`设置被拒绝（${res.status}）`, `settings rejected (${res.status})`));
 					return;
 				}
 				const stored = (await res.json().catch(() => null)) as { settings?: ChatSettings } | null;
 				setSession({ settings: stored?.settings ?? next });
 				setOpen(null);
 			} catch {
-				setError("Could not reach the server — try again.");
+				setError(tr("无法连接服务器 — 请重试。", "Could not reach the server — try again."));
 			}
 		},
 		[chatId],
@@ -273,7 +274,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	return (
 		<div ref={containerRef} className="relative flex items-center gap-1.5" data-testid="model-control">
 			<Hint
-				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}` : "Model selector"}
+				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}` : tr("模型选择器", "Model selector")}
 				action="open-model-picker"
 				side="bottom"
 			>
@@ -287,7 +288,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				// "Thinking" + its real shortcut via the registry (owner interlude
 				// 2026-09-25): ⇧⇥ cycles the level, so "Thinking (⇧⇥)" —
 				// rebind-live like every Hint suffix.
-				label="Thinking"
+				label={tr("推理强度", "Thinking")}
 				action="cycle-thinking"
 				side="bottom"
 			>
@@ -319,10 +320,10 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 						onPick={pickModel}
 						footer={
 							catalog && catalog.models.length === 0
-								? "No models — add a provider key in Keys"
+								? tr("没有可用模型 — 请在“服务商”中添加 API 密钥", "No models — add a provider key in Keys")
 								: chatId
-									? "This session's model"
-									: "Strong tier — the default for new sessions"
+									? tr("该会话的模型", "This session's model")
+									: tr("强力档位 — 新会话的默认模型", "Strong tier — the default for new sessions")
 						}
 					/>
 				</MenuShell>
@@ -339,8 +340,8 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 						levels={catalog ? levels : []}
 						effectiveLevel={effectiveLevel}
 						onPick={(level) => apply(effectiveProvider ?? "", effectiveId ?? "", level as ThinkingLevel)}
-						empty={catalog ? (effectiveId ? `${prettyModel(effectiveId)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
-						footer="Levels this model actually supports"
+						empty={catalog ? (effectiveId ? tr(`${prettyModel(effectiveId)} 不支持调节推理强度。`, `${prettyModel(effectiveId)} has no thinking levels.`) : tr("请先选择模型。", "Pick a model first.")) : tr("加载中…", "Loading…")}
+						footer={tr("该模型实际支持的推理强度", "Levels this model actually supports")}
 					/>
 					{error && <div className="mt-1 text-destructive">{error}</div>}
 				</MenuShell>

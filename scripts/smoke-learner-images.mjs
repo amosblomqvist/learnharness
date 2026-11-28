@@ -146,8 +146,8 @@ try {
 			assert.ok(r > 200 && g < 90 && b < 90, 'red annotation remains aligned');
 		}
 	}
-	assert.equal(await page.$$eval('[data-testid="visual-card"] [aria-label="Invert figure brightness"]', nodes => nodes.length), 1);
-	assert.equal(await page.$$eval('[data-testid="image-card"] [aria-label="Invert figure brightness"]', nodes => nodes.length), 0);
+	assert.equal(await page.$$eval('[data-testid="visual-card"] [aria-label="反转插图亮度"]', nodes => nodes.length), 1);
+	assert.equal(await page.$$eval('[data-testid="image-card"] [aria-label="反转插图亮度"]', nodes => nodes.length), 0);
 	await page.evaluate(() => { window.savedBlobs = []; const original = URL.createObjectURL; URL.createObjectURL = blob => { window.savedBlobs.push(blob); return original(blob); }; });
 	await page.$eval('[data-testid="image-download"]', button => button.click());
 	assert.equal(await page.evaluate(async () => btoa(String.fromCharCode(...new Uint8Array(await window.savedBlobs[0].arrayBuffer())))), image.data);
@@ -178,7 +178,7 @@ try {
 			return image?.naturalWidth === 600 && image.naturalHeight === 1600;
 		});
 		assert.equal(await page.$eval('[data-testid="mermaid-overlay"] img', image => getComputedStyle(image).maxHeight), 'none', 'fullscreen has no inline cap');
-		await page.$eval('[data-testid="mermaid-overlay"] [aria-label="Zoom in"]', button => button.click());
+		await page.$eval('[data-testid="mermaid-overlay"] [aria-label="放大"]', button => button.click());
 		await page.waitForFunction(() => document.querySelector('[data-testid="mermaid-overlay"] img').getBoundingClientRect().height > innerHeight * 0.6);
 		await page.locator('[data-testid="mermaid-overlay-close"]').click();
 	}

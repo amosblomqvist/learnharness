@@ -50,7 +50,7 @@ test("core activation uses separate writable data, pinned assets, and persisted 
 	assert.match(Buffer.from(f.host.asset("official", ["main.js"]).bytes).toString(), /activate/);
 	assert.deepEqual(fs.readdirSync(code).map(name => [name, fs.readFileSync(path.join(code, name), "utf8")]), before);
 	fs.writeFileSync(path.join(code, "main.js"), "export const changed = true;");
-	await f.host.refresh(); assert.match(f.host.list().find(p => p.id === "official")!.error!, /Restart required/);
+	await f.host.refresh(); assert.match(f.host.list().find(p => p.id === "official")!.error!, /需要重启：插件包已更改/);
 	assert.doesNotMatch(Buffer.from(f.host.asset("official", ["main.js"]).bytes).toString(), /changed/);
 	await f.host.setEnabled("official", false); await f.host.dispose();
 	const restarted = createPluginHost(f.deps); t.after(() => restarted.dispose()); await restarted.initialize();
@@ -65,7 +65,7 @@ test("reserved IDs cannot be shadowed even with missing/invalid core code; confl
 	assert.equal(f.host.list().find(p => p.id === "official")!.status, "active");
 	assert.equal(f.host.list().find(p => p.id === "missing")!.status, "error");
 	assert.deepEqual(f.host.conflicts().map(p => p.id), ["missing", "official"]);
-	assert.ok(f.host.conflicts().every(p => /reserved/i.test(p.error)));
+	assert.ok(f.host.conflicts().every(p => /为核心插件保留/.test(p.error)));
 	assert.equal(fs.existsSync(path.join(f.directory, "official", "dist", "backend.cjs")), true);
 	assert.equal(fs.existsSync(path.join(f.directory, "official", "data")), false);
 	fs.rmSync(path.join(f.directory, "official"), { recursive: true }); await f.host.refresh();

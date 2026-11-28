@@ -1,4 +1,5 @@
 import type { PluginFrontendContext, PluginSessionViewInput } from "learnharness-plugin-api";
+import { tr } from "./i18n.ts";
 
 export interface Reference {
   label: string;
@@ -10,18 +11,18 @@ export interface Reference {
 }
 /** Only the host-selected, learner-facing projection is consumed here. */
 export function referenceFor(input: PluginSessionViewInput): Reference | undefined {
-  if (input.type === "thinking") return { label: "Problem", question: input.problem.statement, options: [], multiple: false };
+  if (input.type === "thinking") return { label: tr("题目", "Problem"), question: input.problem.statement, options: [], multiple: false };
   if (input.type !== "answer" || !input.revealed || !input.available) return undefined;
   const question = input.question;
   const tool = question.occurrence.toolName;
-  const label = tool === "probe" ? "Probe" : tool === "recall" ? "Recall" : question.kind === "quiz"
-    ? question.questionType === "predict" ? "Prediction" : "Check" : question.kind === "explain" ? "Explain" : "Question";
+  const label = tool === "probe" ? tr("摸底", "Probe") : tool === "recall" ? tr("回忆", "Recall") : question.kind === "quiz"
+    ? question.questionType === "predict" ? tr("预测", "Prediction") : tr("检验", "Check") : question.kind === "explain" ? tr("解释", "Explain") : tr("问题", "Question");
   return {
     label, question: question.question, context: question.context, multiple: question.mode === "multi-select",
     options: question.mode === "text" ? [] : question.options.map(option => ({ label: option.label,
       ...(question.kind !== "quiz" && option.description ? { description: option.description } : {}) })),
-    ...(question.mode !== "text" && question.kind === "quiz" ? { extra: "I don't know" } :
-      question.mode !== "text" && question.kind === "ask" ? { extra: "Other…" } : {}),
+    ...(question.mode !== "text" && question.kind === "quiz" ? { extra: tr("我不知道", "I don't know") } :
+      question.mode !== "text" && question.kind === "ask" ? { extra: tr("其他…", "Other…") } : {}),
   };
 }
 export function mountReference(root: HTMLElement, ctx: PluginFrontendContext, reference: Reference, signal: AbortSignal): {
@@ -31,7 +32,7 @@ export function mountReference(root: HTMLElement, ctx: PluginFrontendContext, re
   const slots: HTMLElement[] = [];
   const label = document.createElement("div");
   label.className = "drawing-pad-reference-label";
-  label.textContent = reference.label + (reference.multiple ? " · select all that apply" : "");
+  label.textContent = reference.label + (reference.multiple ? tr(" · 可多选", " · select all that apply") : "");
   root.append(label);
   const markdown = (parent: HTMLElement, text: string, className: string) => {
     if (!text) return;

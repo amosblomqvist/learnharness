@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
+import { tr } from "../core/i18n.ts";
 
 /** Browser-only mode: `next dev` / `next start` without the desktop shell's
  * per-launch secret. */
@@ -58,7 +59,7 @@ export function browserHostAllowed(host: string | null, env: Record<string, stri
  * Proxy's truncated body clone. Check before any route-specific work. */
 export function apiRequestRefusal(request: Request, env: Record<string, string | undefined> = process.env): string | undefined {
 	if (browserOnlyMode(env)) return browserAPIRefusal(request, env);
-	if (!desktopAPIAuthorized(request.headers, env)) return "Desktop API access requires the trusted LearnHarness window.";
+	if (!desktopAPIAuthorized(request.headers, env)) return tr("访问桌面 API 需要通过受信任的 LearnHarness 窗口。", "Desktop API access requires the trusted LearnHarness window.");
 }
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -68,12 +69,12 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * from non-browser clients and are allowed. Returns the refusal, if any. */
 export function browserAPIRefusal(request: Request, env: Record<string, string | undefined> = process.env): string | undefined {
 	if (!browserHostAllowed(request.headers.get("host") ?? new URL(request.url).host, env)) {
-		return "This host name is not allowed. Use localhost or an IP address, or add the name to LH_ALLOWED_HOSTS.";
+		return tr("不允许使用此主机名。请使用 localhost 或 IP 地址，或将该名称添加到 LH_ALLOWED_HOSTS。", "This host name is not allowed. Use localhost or an IP address, or add the name to LH_ALLOWED_HOSTS.");
 	}
 	if (READ_METHODS.has(request.method.toUpperCase())) return;
 	const site = request.headers.get("sec-fetch-site");
 	const origin = request.headers.get("origin");
 	if ((site !== null && site !== "same-origin") || (origin !== null && origin !== subscriptionRequestOrigin(request))) {
-		return "Cross-site requests to the LearnHarness API are not allowed.";
+		return tr("不允许跨站请求 LearnHarness API。", "Cross-site requests to the LearnHarness API are not allowed.");
 	}
 }

@@ -80,7 +80,7 @@ describe("browser-only cross-site check", () => {
 				{ origin: "null" },
 				{ origin: "http://localhost:3001" },
 			] as Record<string, string>[]) {
-				assert.match(browserAPIRefusal(request(api, { method, headers }), {}) ?? "", /Cross-site/, `${method} ${JSON.stringify(headers)}`);
+				assert.match(browserAPIRefusal(request(api, { method, headers }), {}) ?? "", /不允许跨站请求/, `${method} ${JSON.stringify(headers)}`);
 			}
 		}
 	});

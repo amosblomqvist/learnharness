@@ -5,16 +5,35 @@ import { NATIVE_SUBSCRIPTIONS, type NativeSubscriptionScope } from "../core/cont
 import { nativeSubscriptionId, nativeSubscriptionBackgroundAllowed, subscriptionScope, subscriptionScopeCurrent, subscriptionAdmissionScope, subscriptionLease, subscriptionAbortController, subscriptionDenial } from "./subscription-bridge.ts";
 import { markUnadmittedUsage, type SubscriptionDispatchLifecycle } from "./subscription-request-cycle.ts";
 import { capturePreparedBackgroundPayload } from "./background-capture.ts";
+import { tr, uiLanguage } from "../core/i18n.ts";
 
 export function nativeSubscriptionError(provider: string, message: string): string {
-	const label = NATIVE_SUBSCRIPTIONS.find((p) => p.logicalId === provider)?.label ?? "Subscription";
-	const suffix = " No API-key fallback was used.";
-	if (/background/i.test(message)) return `${label} background use is off in this app. Enable it in Providers to run this work.${suffix}`;
-	if (/quota|429|limit/i.test(message)) return `${label} usage limit reached. Check your provider account and try again later.${suffix}`;
-	if (/expired|invalid_grant|401|refresh/i.test(message)) return `${label} authorization could not be refreshed. Retry or reconnect in Providers.${suffix}`;
-	if (/cancel|abort|closed|disconnect/i.test(message)) return `${label} request cancelled or connection closed.${suffix}`;
-	if (/catalog|model|stale|changed/i.test(message)) return `The selected ${label} model or connection is unavailable. Refresh Providers and explicitly choose an available model.${suffix}`;
-	return `${label} request failed. Check the connection, account access and provider limits, then retry.${suffix}`;
+	const label = NATIVE_SUBSCRIPTIONS.find((p) => p.logicalId === provider)?.label ?? tr("订阅", "Subscription");
+	const suffix = tr("未回退到 API 密钥。", " No API-key fallback was used.");
+	const errors = tr([
+		`此应用已关闭 ${label} 后台使用。请在“服务商”中开启后再运行此任务。${suffix}`,
+		`${label} 用量已达上限。请检查你的服务商账号，稍后再试。${suffix}`,
+		`无法刷新 ${label} 授权。请重试，或在“服务商”中重新连接。${suffix}`,
+		`${label} 请求已取消或连接已关闭。${suffix}`,
+		`所选的 ${label} 模型或连接不可用。请刷新“服务商”并明确选择一个可用模型。${suffix}`,
+		`${label} 请求失败。请检查连接、账号权限和服务商限额，然后重试。${suffix}`,
+	] as const, [
+		`${label} background use is off in this app. Enable it in Providers to run this work.${suffix}`,
+		`${label} usage limit reached. Check your provider account and try again later.${suffix}`,
+		`${label} authorization could not be refreshed. Retry or reconnect in Providers.${suffix}`,
+		`${label} request cancelled or connection closed.${suffix}`,
+		`The selected ${label} model or connection is unavailable. Refresh Providers and explicitly choose an available model.${suffix}`,
+		`${label} request failed. Check the connection, account access and provider limits, then retry.${suffix}`,
+	] as const);
+	// Already-mapped (localized) text can be classified again downstream; keep it as is.
+	const known = uiLanguage() === "zh" && errors.find((text) => message.includes(text));
+	if (known) return known;
+	if (/background/i.test(message)) return errors[0];
+	if (/quota|429|limit/i.test(message)) return errors[1];
+	if (/expired|invalid_grant|401|refresh/i.test(message)) return errors[2];
+	if (/cancel|abort|closed|disconnect/i.test(message)) return errors[3];
+	if (/catalog|model|stale|changed/i.test(message)) return errors[4];
+	return errors[5];
 }
 export function subscriptionHistory(context: TranscriptContext, logical: Model<Api>, nativeId: string): TranscriptContext {
 	const messages = transformMessages(context.messages, logical);

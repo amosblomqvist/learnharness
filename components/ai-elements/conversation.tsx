@@ -7,6 +7,7 @@ import { ArrowDownIcon, DownloadIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import { tr } from "@/src/core";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
@@ -42,8 +43,8 @@ export type ConversationEmptyStateProps = ComponentProps<"div"> & {
 
 export const ConversationEmptyState = ({
   className,
-  title = "No messages yet",
-  description = "Start a conversation to see messages here",
+  title = tr("暂无消息", "No messages yet"),
+  description = tr("开始对话后，消息会显示在这里", "Start a conversation to see messages here"),
   icon,
   children,
   ...props

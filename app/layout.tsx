@@ -10,6 +10,7 @@ import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
 import { PluginsProvider } from "@/components/plugins";
 import { readThemeBoot } from "@/src/server";
+import { tr } from "@/src/core";
 
 // Chrome = JetBrains Mono, teaching prose = Source Sans 3, titles = CMU
 // Serif (the bundled lh-cmu @font-face in globals.css — no CDN).
@@ -18,7 +19,7 @@ const prose = Source_Sans_3({ subsets: ["latin"], variable: "--font-sans3" });
 
 export const metadata: Metadata = {
 	title: "Learning Harness",
-	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
+	description: tr("有记忆的 AI 老师：会话、小测，以及一张记录你所学知识的知识图谱。", "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know."),
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -30,7 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 	const { appearance, theme, vars } = readThemeBoot();
 	return (
 		<html
-			lang="en"
+			lang={tr("zh-CN", "en")}
 			className={`${theme.mode} ${ui.variable} ${prose.variable}`}
 			style={vars as React.CSSProperties}
 			suppressHydrationWarning

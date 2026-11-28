@@ -11,6 +11,7 @@ import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
 	type RectLike, type SelectionActionPoint,
 } from "./selection-actions";
+import { tr } from "@/src/core";
 
 /** One button on the toolbar. Cite is the first; side questions adds more. */
 export interface SelectionAction {
@@ -184,7 +185,7 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 		<div
 			ref={toolbarRef}
 			role="toolbar"
-			aria-label="Selection actions"
+			aria-label={tr("选区操作", "Selection actions")}
 			data-testid="selection-toolbar"
 			className="fixed z-50 flex max-w-[calc(100vw-1rem)] gap-1"
 			style={{ left: state.position.x, top: state.position.y }}

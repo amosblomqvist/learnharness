@@ -32,6 +32,7 @@ import {
 	readSettingsRecord,
 	writeSettingsRecord,
 } from "@/src/server";
+import { tr } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
@@ -45,14 +46,14 @@ function segmentPathFrom(segments: string[]): string | null {
 export async function PUT(request: Request, ctx: { params: Promise<{ segment: string[] }> }) {
 	const { segment } = await ctx.params;
 	const path = segmentPathFrom(segment);
-	if (!path) return Response.json({ error: "invalid segment path" }, { status: 400 });
+	if (!path) return Response.json({ error: tr("无效的片段路径", "invalid segment path") }, { status: 400 });
 	const body = (await request.json().catch(() => null)) as { text?: unknown } | null;
 	if (!body || typeof body.text !== "string") {
-		return Response.json({ error: "body must be {text: string}" }, { status: 400 });
+		return Response.json({ error: tr("请求体必须是 {text: string}", "body must be {text: string}") }, { status: 400 });
 	}
 	if (!new Set(allSegmentPaths()).has(path)) {
 		return Response.json(
-			{ error: `"${path}" is not a current source segment`, supported: allSegmentPaths() },
+			{ error: tr(`“${path}”不是当前的提示词片段`, `"${path}" is not a current source segment`), supported: allSegmentPaths() },
 			{ status: 400 },
 		);
 	}
@@ -63,7 +64,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ segment: st
 export async function DELETE(_request: Request, ctx: { params: Promise<{ segment: string[] }> }) {
 	const { segment } = await ctx.params;
 	const path = segmentPathFrom(segment);
-	if (!path) return Response.json({ error: "invalid segment path" }, { status: 400 });
+	if (!path) return Response.json({ error: tr("无效的片段路径", "invalid segment path") }, { status: 400 });
 	// Clear the record's switch FIRST (crash between the two leaves "off +
 	// file" — valid — never an orphaned ON), then unlink the file.
 	const record = readSettingsRecord();

@@ -176,7 +176,7 @@ test('content deletion validates the whole selection and stale snapshots atomica
   assert.deepEqual(h.disk(), before); assert.equal(h.state().propositions[0].cues.length, 2);
   await h.call('delete-content', input); const accepted = h.disk();
   h.activate(); await h.call('delete-content', input); assert.deepEqual(h.disk(), accepted, 'same request cannot delete more content or fail as stale');
-  await assert.rejects(h.call('delete-content', { ...input, deleteEmptyDecks: false }), /different work/);
+  await assert.rejects(h.call('delete-content', { ...input, deleteEmptyDecks: false }), /此请求 ID 已用于其他操作/);
 });
 
 test('legacy tombstones are purged on activation without losing text-free manual creation receipts or past review statistics', async t => {
@@ -211,7 +211,7 @@ test('file source data follows its deck, not its last target; deleted decks cann
   assert.equal(h.state().propositions.length, 0); assert.equal(h.catalogReads, reads); assert.equal(h.workers.starts, starts);
   await h.call('delete-deck', { id: batch.deckId });
   assert.equal(fs.existsSync(sourceFile), false); assert.equal(h.disk().fileSources[batch.sourceId], undefined);
-  await assert.rejects(h.call('open-file-deck', { sourceId: batch.sourceId }), /File source not found/);
+  await assert.rejects(h.call('open-file-deck', { sourceId: batch.sourceId }), /未找到文件来源/);
   const fresh = await h.call('preflight-file', input); assert.ok(fresh.id); assert.equal(fresh.existingSourceId, undefined);
   assert.equal(h.state().decks.length, 0); assert.equal(h.workers.starts, starts, 'upload still requires fresh confirmation');
 });
@@ -222,9 +222,9 @@ test('all deletion entry points reject active and cancelling generation; cancell
   const [task] = await h.start(['p1']);
   const checkBlocked = async () => {
     const before = h.disk();
-    await assert.rejects(h.call('delete-content', { cueIds: [p.cues[0].id], revision: h.state().revision, deleteEmptyDecks: true, requestId: randomUUID() }), /generation to finish or cancel/);
-    await assert.rejects(h.call('delete-deck', { id: deckId }), /generation to finish or cancel/);
-    await assert.rejects(h.call('delete-cue', { propositionId: p.id, cueId: p.cues[0].id, version: p.version }), /generation to finish or cancel/);
+    await assert.rejects(h.call('delete-content', { cueIds: [p.cues[0].id], revision: h.state().revision, deleteEmptyDecks: true, requestId: randomUUID() }), /请等待生成完成或先取消生成/);
+    await assert.rejects(h.call('delete-deck', { id: deckId }), /请等待生成完成或先取消生成/);
+    await assert.rejects(h.call('delete-cue', { propositionId: p.id, cueId: p.cues[0].id, version: p.version }), /请等待生成完成或先取消生成/);
     assert.deepEqual(h.disk(), before);
   };
   await checkBlocked(); await h.call('cancel-generation', { batchId: h.state().batch.id }); await checkBlocked();
@@ -243,7 +243,7 @@ test('failed saved-source cleanup is durable and retryable without restoring con
     return unlink(filename);
   });
   const deletion = { deckIds: [batch.deckId], revision: h.state().revision, deleteEmptyDecks: true, requestId: 'cleanup-retry' };
-  try { await assert.rejects(h.call('delete-content', deletion), /cleanup is pending/); }
+  try { await assert.rejects(h.call('delete-content', deletion), /已保存文件的清理尚未完成/); }
   finally { failure.mock.restore(); }
   assert.equal(h.state().decks.length, 0); assert.equal(h.state().propositions.length, 0); assert.equal(h.disk().fileSources[batch.sourceId], undefined);
   assert.deepEqual(h.disk().pendingSourceRemovals, [batch.sourceId]); assert.equal(fs.existsSync(sourceFile), true);
@@ -261,7 +261,7 @@ test('activation completes pending source cleanup after its final metadata write
     if (++writes === 2) throw new Error('Cleanup marker save unavailable');
     return rename(...args);
   });
-  try { await assert.rejects(h.call('delete-content', deletion), /cleanup is pending/); }
+  try { await assert.rejects(h.call('delete-content', deletion), /已保存文件的清理尚未完成/); }
   finally { failure.mock.restore(); }
   assert.equal(fs.existsSync(path.join(h.directory, 'sources', `${batch.sourceId}.md`)), false);
   assert.deepEqual(h.disk().pendingSourceRemovals, [batch.sourceId]);
@@ -296,7 +296,7 @@ test('activation forgets legacy orphaned file sources rather than recreating del
   assert.equal(fs.existsSync(path.join(h.directory, 'sources', `${batch.sourceId}.md`)), false);
   assert.equal(h.state().propositions[0].id, p.id); assert.equal(h.state().propositions[0].archived, false);
   assert.ok((await h.call('preflight-file', input)).id);
-  await assert.rejects(h.call('open-file-deck', { sourceId: batch.sourceId }), /File source not found/);
+  await assert.rejects(h.call('open-file-deck', { sourceId: batch.sourceId }), /未找到文件来源/);
   assert.deepEqual(h.state().decks.map(d => d.id), [keep.id]);
 });
 
@@ -344,7 +344,7 @@ test('manual creation receipts survive restart, editing and deletion; duplicate 
   const create = { deckId: h.state().decks[0].id, name: 'Target', question: 'Question', answer: 'Answer', requestId: 'create-once' };
   const first = await h.call('create-card', create), before = h.disk();
   const repeated = await h.call('create-card', create); assert.equal(repeated.propositionId, first.propositionId); assert.equal(repeated.cueId, first.cueId); assert.deepEqual(h.disk(), before);
-  await assert.rejects(h.call('create-card', { ...create, answer: 'Different' }), /different work/);
+  await assert.rejects(h.call('create-card', { ...create, answer: 'Different' }), /此请求 ID 已用于其他操作/);
   const append = { propositionId: first.propositionId, question: 'Second', answer: 'Answer', requestId: 'append-once' };
   const second = await h.call('create-cue', append);
   await h.call('save-cue', { propositionId: first.propositionId, cueId: second.cueId, question: 'Edited', answer: 'Edited answer', version: h.state().propositions[0].version });
@@ -352,19 +352,19 @@ test('manual creation receipts survive restart, editing and deletion; duplicate 
   h.activate(); const saved = h.disk();
   const retry = await h.call('create-cue', append); assert.equal(retry.cueId, second.cueId); assert.deepEqual(h.disk(), saved);
   const retryCreate = await h.call('create-card', create); assert.equal(retryCreate.propositionId, first.propositionId); assert.deepEqual(h.disk(), saved);
-  await assert.rejects(h.call('create-cue', { ...append, question: 'Changed request' }), /different work/);
+  await assert.rejects(h.call('create-cue', { ...append, question: 'Changed request' }), /此请求 ID 已用于其他操作/);
   assert.equal(h.state().propositions.length, 1); assert.equal(h.state().propositions[0].cues.length, 1);
 });
 
 test('manual writes reject blank content, missing destinations and archived graph targets without partial mutation', async t => {
   const h = harness(t); await h.generate(cards('p1', 'Graph cue'));
   const input = { deckId: h.state().decks[0].id, name: 'Name', question: 'Question', answer: 'Answer', requestId: 'new' }, before = h.disk();
-  for (const key of ['name', 'question', 'answer', 'requestId']) await assert.rejects(h.call('create-card', { ...input, [key]: '  ' }), /blank/);
-  await assert.rejects(h.call('create-card', { ...input, deckId: 'missing' }), /Deck not found/);
-  await assert.rejects(h.call('create-cue', { propositionId: 'missing', question: 'Q', answer: 'A', requestId: 'x' }), /Proposition not found/);
-  for (const key of ['question', 'answer', 'requestId']) await assert.rejects(h.call('create-cue', { propositionId: 'p1', question: 'Q', answer: 'A', requestId: 'x', [key]: '' }), /blank/);
+  for (const key of ['name', 'question', 'answer', 'requestId']) await assert.rejects(h.call('create-card', { ...input, [key]: '  ' }), /不能为空/);
+  await assert.rejects(h.call('create-card', { ...input, deckId: 'missing' }), /未找到卡组/);
+  await assert.rejects(h.call('create-cue', { propositionId: 'missing', question: 'Q', answer: 'A', requestId: 'x' }), /未找到命题/);
+  for (const key of ['question', 'answer', 'requestId']) await assert.rejects(h.call('create-cue', { propositionId: 'p1', question: 'Q', answer: 'A', requestId: 'x', [key]: '' }), /不能为空/);
   h.graph.propositions = [];
-  await assert.rejects(h.call('create-cue', { propositionId: 'p1', question: 'Q', answer: 'A', requestId: 'x' }), /no longer|archived/);
+  await assert.rejects(h.call('create-cue', { propositionId: 'p1', question: 'Q', answer: 'A', requestId: 'x' }), /已不在图谱中/);
   assert.deepEqual(h.disk(), before);
 });
 
@@ -405,7 +405,7 @@ test('file preflight is temporary and validates inputs before catalog access; co
   h.workers.stage(task.id, fileResult(fileFact('Unaccepted', 'Nonterminal results do not apply', 'Staged cue'))); await flush();
   assert.equal(h.state().propositions.length, 0);
   await h.call('start-generation', request); assert.equal(h.workers.starts, 1);
-  await assert.rejects(h.call('start-generation', { ...request, preflightId: 'another' }), /different work/);
+  await assert.rejects(h.call('start-generation', { ...request, preflightId: 'another' }), /此请求 ID 已用于其他操作/);
   await h.complete(task, fileResult());
   assert.equal(h.state().batch.status, 'completed'); assert.equal(h.state().decks.length, 1); assert.equal(h.state().propositions.length, 0);
   assert.deepEqual(h.graph, graphBefore);
@@ -443,7 +443,7 @@ test('file preflight rechecks active batches after a deferred catalog resolves',
   await h.startFile({ name: 'other.md', markdown: 'A different file confirmed during the pending catalog request.' });
   const before = h.disk(); assert.equal(h.state().batch.status, 'running');
   release(structuredClone(h.catalog));
-  await assert.rejects(pending, /generation batch is already active/);
+  await assert.rejects(pending, /已有生成批次正在进行/);
   assert.deepEqual(h.disk(), before); assert.equal(h.workers.starts, 1);
   assert.equal(h.state().decks.length, 1); assert.equal(Object.keys(h.disk().fileSources).length, 1);
 });
@@ -489,7 +489,7 @@ test('identical files reopen renamed decks without catalog access; deleting the 
   assert.equal(opened.deckId, source.deckId); assert.equal(opened.state.decks[0].name, 'My renamed collection');
   const reviews = h.disk().reviews;
   await h.call('delete-deck', { id: source.deckId });
-  await assert.rejects(h.call('open-file-deck', { sourceId: source.id }), /File source not found/);
+  await assert.rejects(h.call('open-file-deck', { sourceId: source.id }), /未找到文件来源/);
   h.catalog.slots.cheap = { model: { provider: 'mock', id: 'cheap' }, thinkingLevel: 'off' };
   assert.ok((await h.call('preflight-file', input)).id);
   assert.equal(h.state().decks.length, 0); assert.equal(h.state().propositions.length, 0);
@@ -505,7 +505,7 @@ test('same-source exact statements and questions collapse across chunks; deletio
   let p = h.state().propositions[0];
   await h.call('save-cue', { propositionId: p.id, cueId: p.cues[0].id, question: 'Manual cue', answer: 'Manual answer', version: p.version });
   p = h.state().propositions[0];
-  await assert.rejects(h.call('delete-cue', { propositionId: p.id, cueId: p.cues[1].id, version: p.version }), /generation to finish or cancel/);
+  await assert.rejects(h.call('delete-cue', { propositionId: p.id, cueId: p.cues[1].id, version: p.version }), /请等待生成完成或先取消生成/);
   await h.grade({ propositionIds: [p.id] });
   const before = h.state().propositions[0], history = h.disk().reviews;
   for (const task of tasks.slice(1)) await h.complete(task, fileResult(fileFact('Do not rename', 'Shared statement', 'Manual cue', 'Deleted cue', 'New cue')));
@@ -551,7 +551,7 @@ test('file retries cover only failed source spans with current settings and cann
   assert.equal(h.state().batch.status, 'completed'); assert.equal(h.state().decks.length, 1);
   assert.deepEqual(h.state().propositions.find(p => p.id === accepted.id).schedule, progress);
   const starts = h.workers.starts;
-  await assert.rejects(h.call('preflight-file-retry', { batchId: batch.id }), /No failed file chunks/);
+  await assert.rejects(h.call('preflight-file-retry', { batchId: batch.id }), /没有可重试的失败文件分块/);
   assert.equal(h.workers.starts, starts); assert.equal(h.disk().reviews.length, 1);
   assert.equal(fs.readFileSync(path.join(h.directory, 'flashcards.json'), 'utf8').includes('Section 0'), false);
 });
@@ -598,7 +598,7 @@ test('confirmation failures do not retain unaccepted file metadata; stale plans 
   await assert.rejects(h.call('preflight-file-retry', { batchId: batch.id }), /ENOENT/);
   const changed = await h.call('preflight-file', { name: 'changed.md', markdown: 'Changed text.' });
   await h.call('save-settings', { thinkingOverride: 'low' });
-  await assert.rejects(h.call('start-generation', { preflightId: changed.id, requestId: 'stale-file-plan' }), /changed/);
+  await assert.rejects(h.call('start-generation', { preflightId: changed.id, requestId: 'stale-file-plan' }), /已更改/);
   assert.equal(h.workers.starts, 1);
 });
 
@@ -625,7 +625,7 @@ test('clearing overrides follows cheap configuration and unrelated generation se
   assert.equal(Object.hasOwn(h.state().settings, 'thinkingOverride'), false);
   await h.call('reveal-review', { ticketId: ticket.id });
   await h.call('rate-review', { ticketId: ticket.id, rating: 4, requestId: 'stable-rating' });
-  await assert.rejects(h.call('rate-review', { ticketId: ticket.id, rating: 1, requestId: 'stable-rating' }), /different work/);
+  await assert.rejects(h.call('rate-review', { ticketId: ticket.id, rating: 1, requestId: 'stable-rating' }), /此请求 ID 已用于其他操作/);
   assert.equal(h.state().propositions[0].schedule.reps, 1);
 });
 
@@ -637,7 +637,7 @@ test('same accepted generation request is reused but changed preflight identity 
   await flush();
   await h.call('start-generation', input);
   assert.equal(h.workers.starts, 1);
-  await assert.rejects(h.call('start-generation', { ...input, preflightId: 'different-plan' }), /different work/);
+  await assert.rejects(h.call('start-generation', { ...input, preflightId: 'different-plan' }), /此请求 ID 已用于其他操作/);
 });
 
 test('reordering skips deleted cues and archived propositions', async t => {
@@ -669,9 +669,9 @@ test('packing includes complete immediate chains and only active cues, never del
   assert.equal(JSON.stringify(input).includes('Deleted cue'), false);
   assert.equal(JSON.stringify(input).includes('Old answer'), false);
   assert.equal(input.sources[0].label, 'Source lesson');
-  assert.throws(() => pack(g, [], state), /Select at least one/);
-  assert.throws(() => pack(g, ['missing'], state), /no longer in the graph/);
-  assert.throws(() => pack({ ...g, propositions: g.propositions.filter(p => p.id !== 'b') }, ['c'], state), /Incomplete reasoning chain: b/);
+  assert.throws(() => pack(g, [], state), /请至少选择一个命题/);
+  assert.throws(() => pack(g, ['missing'], state), /所选命题已不在图谱中/);
+  assert.throws(() => pack({ ...g, propositions: g.propositions.filter(p => p.id !== 'b') }, ['c'], state), /推理链不完整：b/);
   assert.deepEqual(pack(g, ['c'], { ...state, settings: { ...state.settings, chunkBudget: 1 } }), [input], 'an indivisible target rides alone, outside context does not consume its budget');
 });
 
@@ -795,7 +795,7 @@ test('review hides answer until reveal, requires reveal, and grading is idempote
   assert.equal(Object.hasOwn(ticket, 'answer'), false);
   assert.equal(JSON.stringify(ticket).includes('Answer:'), false);
   const requestId = randomUUID();
-  await assert.rejects(h.call('rate-review', { ticketId: ticket.id, rating: 3, requestId }), /Reveal/);
+  await assert.rejects(h.call('rate-review', { ticketId: ticket.id, rating: 3, requestId }), /请先显示答案再评分/);
   const revealed = await h.call('reveal-review', { ticketId: ticket.id });
   assert.equal(revealed.answer, 'Answer: Question');
   assert.deepEqual(Object.keys(revealed.intervals), ['1', '2', '3', '4']);
@@ -812,11 +812,11 @@ test('review tickets invalidate when card content or scheduling settings change'
   const { ticket } = await h.call('next-review');
   const p = h.state().propositions[0];
   await h.call('save-cue', { propositionId: p.id, cueId: p.cues[0].id, question: 'Changed question', answer: 'Changed answer', version: p.version });
-  await assert.rejects(h.call('reveal-review', { ticketId: ticket.id }), /changed elsewhere/);
+  await assert.rejects(h.call('reveal-review', { ticketId: ticket.id }), /此次复习已在别处被更改/);
   const next = (await h.call('next-review')).ticket;
   await h.call('reveal-review', { ticketId: next.id });
   await h.call('save-settings', { retention: .95 });
-  await assert.rejects(h.call('rate-review', { ticketId: next.id, rating: 4, requestId: randomUUID() }), /changed elsewhere/);
+  await assert.rejects(h.call('rate-review', { ticketId: next.id, rating: 4, requestId: randomUUID() }), /此次复习已在别处被更改/);
   assert.equal(h.disk().reviews.length, 0);
 });
 
@@ -908,7 +908,7 @@ test('cue filters are strict for empty, unknown, deleted or archived selections 
     assert.deepEqual(await h.call('next-review', { cueIds }), { ticket: null, remaining: 0 });
   }
   for (const cueIds of [null, p.cues[1].id, {}, [1], [p.cues[1].id, false], [[p.cues[1].id]]]) {
-    await assert.rejects(h.call('next-review', { cueIds }), /Invalid cue selection/);
+    await assert.rejects(h.call('next-review', { cueIds }), /无效的提示语选择/);
   }
   for (const scope of [{ deckIds: [] }, { propositionIds: [] }]) {
     assert.equal((await h.call('next-review', { ...scope, cueIds: [p.cues[1].id] })).ticket, null);
@@ -1189,7 +1189,7 @@ test('restart reconciles accepted durable results exactly once and never replays
   h.dispose(); h.workers.tasks.delete(missing.id); h.activate();
   await flush();
   assert.equal(h.workers.starts, 2);
-  assert.match(h.state().batch.error, /worker record could not be read/);
+  assert.match(h.state().batch.error, /无法读取后台任务记录/);
   assert.equal(h.state().propositions[0].cues.length, 1);
   // A transiently unreadable accepted record is recoverable, not auto-replayed.
   h.workers.tasks.set(missing.id, durableTask);
@@ -1209,7 +1209,7 @@ test('settings validate atomically and model resolution fails explicitly without
     assert.deepEqual(h.state(), before);
   }
   h.catalog.slots = {};
-  await assert.rejects(h.call('preflight', { propositionIds: ['p1'] }), /Configure the cheap model slot/);
+  await assert.rejects(h.call('preflight', { propositionIds: ['p1'] }), /请配置经济档位/);
   assert.equal(h.workers.starts, 0);
   assert.deepEqual(h.state().propositions, []);
 });

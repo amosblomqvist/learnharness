@@ -14,13 +14,14 @@ import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { tr } from "@/src/core";
 
 /** Ask always opens the selected teaching segment's ONE conversation. Cite
  * is an independent action that inserts a chip into the main/thinking field. */
 export function createSideQuestionActions({ open }: { open: (args: SideThreadOpenArgs) => void }): SelectionAction[] {
 	return [{
-		id: "side-ask", label: "Ask", ariaLabel: "Ask a side question about this selection", icon: MessageCircleQuestion, visible: () => true,
-		disabledLabel: (capture) => capture.selector.text.length > SIDE_QUOTE_MAX_CHARS ? "Shorten selection" : null,
+		id: "side-ask", label: tr("提问", "Ask"), ariaLabel: tr("就所选内容发起旁支提问", "Ask a side question about this selection"), icon: MessageCircleQuestion, visible: () => true,
+		disabledLabel: (capture) => capture.selector.text.length > SIDE_QUOTE_MAX_CHARS ? tr("请缩短选择内容", "Shorten selection") : null,
 		onSelect: (capture) => {
 			const { text, start, end, prefix, suffix } = capture.selector;
 			open({ anchor: { kind: "range", range: capture.range.cloneRange() }, passage: {
@@ -31,7 +32,7 @@ export function createSideQuestionActions({ open }: { open: (args: SideThreadOpe
 	}];
 }
 export function sideThreadPlaceholder(state: SideThreadState): string {
-	return state.pendingPassage ? "Ask about this passage…" : state.messages.length ? "Ask a follow-up…" : "Ask a side question…";
+	return state.pendingPassage ? tr("就这段内容提问…", "Ask about this passage…") : state.messages.length ? tr("继续追问…", "Ask a follow-up…") : tr("发起旁支提问…", "Ask a side question…");
 }
 export interface SideThreadHandlers {
 	dictation?: { phase: DictationPhase; active: boolean; blocked: boolean; error: string | null; levelRef?: { current: number }; toggle: () => void; finish: () => Promise<void> };
@@ -51,7 +52,7 @@ function Passage({ text, chatId, sourceMessageId, selector, citation: savedCitat
 	if (!actions?.openSource || (!savedCitation && (!chatId || !sourceMessageId))) return quote;
 	const citation: TutorCitation = savedCitation ?? { version: 1, chatId: chatId!, messageId: sourceMessageId!, text,
 		...(selector ?? { start: 0, end: text.length, prefix: "", suffix: "" }) };
-	return <button type="button" data-testid="side-passage-link" aria-label="Show the quoted tutor text" title="Show in the lesson"
+	return <button type="button" data-testid="side-passage-link" aria-label={tr("显示被引用的老师原文", "Show the quoted tutor text")} title={tr("在课程中显示", "Show in the lesson")}
 		className="cursor-pointer rounded-sm text-left hover:bg-accent/50" onClick={(event) => actions.openSource!(citation, event.currentTarget)}>{quote}</button>;
 }
 
@@ -62,7 +63,7 @@ function SideInputMeter({ levelRef }: { levelRef?: { current: number } }) {
 		const timer = setInterval(() => setLevel(rmsToMeter(levelRef?.current ?? 0)), 60);
 		return () => clearInterval(timer);
 	}, [levelRef]);
-	return <span data-testid="side-input-meter" role="meter" aria-label="Microphone input level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)}
+	return <span data-testid="side-input-meter" role="meter" aria-label={tr("麦克风输入音量", "Microphone input level")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)}
 		className="flex h-4 items-center gap-px text-error">
 		{[0.6, 1, 0.6].map((scale, index) => <span key={index} aria-hidden="true" className="w-0.5 rounded-full bg-current transition-[height] duration-75 motion-reduce:transition-none" style={{ height: 2 + 12 * scale * level }} />)}
 	</span>;
@@ -119,39 +120,39 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				data-testid="side-thread-header" onPointerDown={onDragStart}>
 				{onDragStart && <GripVertical aria-hidden="true" className="-ml-1 size-3.5 text-muted-foreground" />}
 				<MessageCircleQuestion aria-hidden="true" className="size-3.5 text-muted-foreground" />
-				<span className="flex-1 font-ui text-xs text-muted-foreground">Side question</span>
-				<Button type="button" size="icon-xs" variant="ghost" aria-label={state.mode === "popover" ? "Dock side conversation" : "Float side conversation"}
-					title={state.mode === "popover" ? "Pin to side" : "Unpin to float"} onClick={state.mode === "popover" ? onExpand : onFloat}>
+				<span className="flex-1 font-ui text-xs text-muted-foreground">{tr("旁支提问", "Side question")}</span>
+				<Button type="button" size="icon-xs" variant="ghost" aria-label={state.mode === "popover" ? tr("将旁支提问停靠到侧边", "Dock side conversation") : tr("将旁支提问设为浮动", "Float side conversation")}
+					title={state.mode === "popover" ? tr("固定到侧边", "Pin to side") : tr("取消固定，改为浮动", "Unpin to float")} onClick={state.mode === "popover" ? onExpand : onFloat}>
 					{state.mode === "popover" ? <Pin aria-hidden="true" /> : <PinOff aria-hidden="true" />}
 				</Button>
-				<Button type="button" size="icon-xs" variant="ghost" aria-label="Close side conversation" title="Close" onClick={onClose}><X aria-hidden="true" /></Button>
+				<Button type="button" size="icon-xs" variant="ghost" aria-label={tr("关闭旁支提问", "Close side conversation")} title={tr("关闭", "Close")} onClick={onClose}><X aria-hidden="true" /></Button>
 			</div>
 			<div ref={scrollRef} data-side-scroll="" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto font-prose">
 				{state.messages.map((message) => (
 					<div key={message.id} data-testid={message.role === "user" ? "side-learner-message" : "side-helper-message"} className={message.role === "user" ? "ml-auto flex w-fit max-w-[70%] flex-col gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm [overflow-wrap:anywhere]" : "flex flex-col gap-1.5 text-sm"}>
 						{message.quotes?.map((quote, index) => <Passage key={index} text={quote} citation={collectCitations(message.quoteCitations?.[index] ?? "")[0]?.citation} />)}
 						{message.role === "user" ? <p className="whitespace-pre-wrap font-medium">{message.text}</p> : <MessageResponse>{message.text}</MessageResponse>}
-						{message.stopped && <span className="font-ui text-xs text-muted-foreground">Stopped</span>}
+						{message.stopped && <span className="font-ui text-xs text-muted-foreground">{tr("已停止", "Stopped")}</span>}
 						{message.error && <span role="alert" className="text-xs text-destructive">{message.error}</span>}
 					</div>
 				))}
 				{state.answering && <div data-testid="side-streaming-answer" className="text-sm">
-					{state.streamText ? <MessageResponse>{state.streamText}</MessageResponse> : <BrailleSpinner label="Answering" />}
+					{state.streamText ? <MessageResponse>{state.streamText}</MessageResponse> : <BrailleSpinner label={tr("回答中", "Answering")} />}
 				</div>}
 				{state.error && <p role="alert" className="text-xs text-destructive">{state.error}</p>}
 				{!state.answering && (last?.role === "user" || (last?.role === "assistant" && last.error !== undefined)) && (
-					<button type="button" className="self-start font-ui text-xs text-muted-foreground hover:text-foreground" onClick={() => void onAsk("", true)}>Retry answer</button>
+					<button type="button" className="self-start font-ui text-xs text-muted-foreground hover:text-foreground" onClick={() => void onAsk("", true)}>{tr("重试回答", "Retry answer")}</button>
 				)}
 			</div>
 			<div className="flex flex-col gap-1.5 font-prose">
 				{onCurrentStep && <button type="button" data-testid="side-current-step" className="flex items-center gap-1.5 self-start font-ui text-xs text-muted-foreground hover:text-foreground" onClick={onCurrentStep}>
-					Go to current step <ArrowRight aria-hidden="true" className="size-3.5" />
+					{tr("前往当前步骤 ", "Go to current step ")} <ArrowRight aria-hidden="true" className="size-3.5" />
 				</button>}
 				{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
 				{dictation?.error && <p role="alert" className="font-ui text-xs text-destructive">{dictation.error}</p>}
 				<div className="flex items-end gap-1.5">
 					<div data-testid="side-composer-surface" className="relative min-w-0 flex-1 rounded-[10px] border bg-card focus-within:border-primary/50">
-					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
+					<Textarea ref={inputRef} aria-label={tr("旁支提问", "Side question")} data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
 						value={question} maxLength={SIDE_QUESTION_MAX_CHARS} placeholder={sideThreadPlaceholder(state)} onChange={(event) => changeDraft(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.nativeEvent.isComposing || !isInteractionScopeEligible(inputRef.current, controller)) return;
@@ -161,14 +162,14 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 					{dictation && <div className="absolute right-1 bottom-1 flex h-7 items-center gap-1">
 						{dictation.phase === "recording" && <SideInputMeter levelRef={dictation.levelRef} />}
 						<button type="button" data-testid="side-dictation-toggle"
-						aria-label={dictation.active ? "Stop side dictation" : "Start side dictation"} aria-pressed={dictation.active}
-						title={dictation.error ?? (dictation.active ? "Stop side dictation" : "Dictate side question")}
+						aria-label={dictation.active ? tr("停止旁支提问语音听写", "Stop side dictation") : tr("开始旁支提问语音听写", "Start side dictation")} aria-pressed={dictation.active}
+						title={dictation.error ?? (dictation.active ? tr("停止旁支提问语音听写", "Stop side dictation") : tr("语音听写旁支提问", "Dictate side question"))}
 						disabled={dictation.blocked || dictation.phase === "stopping"} onClick={dictation.toggle}
 						className={`flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-error/15 text-error" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
 						<Mic aria-hidden="true" className="size-3.5" />
 					</button></div>}
 					</div>
-					<button type="button" aria-label={state.answering ? "Stop side answer" : "Send side question"}
+					<button type="button" aria-label={state.answering ? tr("停止旁支回答", "Stop side answer") : tr("发送旁支提问", "Send side question")}
 						disabled={!state.answering && !question.trim() && !dictation?.active} onClick={state.answering ? onStop : () => void submit()}
 						className={`flex size-9 shrink-0 items-center justify-center rounded-[10px] transition-colors ${state.answering ? "bg-secondary text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"}`}>
 						{state.answering ? <Square aria-hidden="true" className="size-4" /> : <CornerDownLeft aria-hidden="true" className="size-5" />}
@@ -275,7 +276,7 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 	};
 	const style: React.CSSProperties = frame ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
 		: placement ? { ...placement.style, maxHeight: placement.maxHeight } : { left: 0, top: 0, visibility: "hidden" };
-	return <div ref={boxRef} role="dialog" aria-label="Side question" data-testid="side-thread-popover"
+	return <div ref={boxRef} role="dialog" aria-label={tr("旁支提问", "Side question")} data-testid="side-thread-popover"
 		style={{ position: "fixed", zIndex: 60, ...style }} className="lh-no-drag flex flex-col overflow-hidden rounded-xl border bg-background/50 p-3 text-sm shadow-xl backdrop-blur-[18px]">
 		<SideThreadBody key={state.threadId} state={state} chatId={chatId} {...handlers} onDragStart={startDrag} />
 		{RESIZE_HANDLES.map(({ edge, className }) => <div key={edge} aria-hidden="true" data-side-resize={edge}
@@ -284,5 +285,5 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 	</div>;
 }
 export function SideThreadPanel({ children }: { children: ReactNode }) {
-	return <aside aria-label="Side question" data-testid="side-thread-panel" className="flex w-[22rem] shrink-0 flex-col border-l border-border bg-background p-3">{children}</aside>;
+	return <aside aria-label={tr("旁支提问", "Side question")} data-testid="side-thread-panel" className="flex w-[22rem] shrink-0 flex-col border-l border-border bg-background p-3">{children}</aside>;
 }

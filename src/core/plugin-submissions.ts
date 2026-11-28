@@ -6,6 +6,7 @@ import type { PluginProblemSnapshot } from "./plugin-problems.ts";
 import type { AnswerRequest, ClientQuestion, QuestionData, QuizQuestionType } from "./question-core.ts";
 import { clonePluginQuestionJson } from "./plugin-questions.ts";
 import type { PluginSurfaceTarget } from "./plugin-ui.ts";
+import { tr } from "./i18n.ts";
 
 type Immutable<T> = T extends (...args: never[]) => unknown ? T : T extends object ? { readonly [K in keyof T]: Immutable<T[K]> } : T;
 type ImmutableJson = null | boolean | number | string | ImmutableJsonArray | ImmutableJsonObject;
@@ -75,11 +76,11 @@ const imageMimeTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/
 const base64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 function object(value: unknown): Record<string, unknown> {
-	if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Submission must contain objects");
+	if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(tr("提交内容必须由对象组成", "Submission must contain objects"));
 	return value as Record<string, unknown>;
 }
 function keys(value: Record<string, unknown>, allowed: readonly string[], required: readonly string[] = allowed): void {
-	if (Object.keys(value).some(key => !allowed.includes(key)) || required.some(key => !Object.hasOwn(value, key))) throw new Error("Unexpected or missing submission fields");
+	if (Object.keys(value).some(key => !allowed.includes(key)) || required.some(key => !Object.hasOwn(value, key))) throw new Error(tr("提交内容包含意外字段或缺少字段", "Unexpected or missing submission fields"));
 }
 function freeze<T>(value: T): T {
 	if (value !== null && typeof value === "object") {
@@ -91,21 +92,21 @@ function freeze<T>(value: T): T {
 function content(value: unknown): PluginSubmissionContent {
 	const item = object(value);
 	keys(item, ["text", "images"]);
-	if (typeof item.text !== "string") throw new Error("Submission text must be a string");
+	if (typeof item.text !== "string") throw new Error(tr("提交的文本必须是字符串", "Submission text must be a string"));
 	return { text: item.text, images: imageList(item.images) };
 }
 /** Structural browser validation only. Byte sniffing/normalization belongs to server admission. */
 export function preparePluginSubmissionImage(value: unknown): Readonly<ImageContent> {
 	const item = object(clonePluginQuestionJson(value));
 	keys(item, ["type", "data", "mimeType"]);
-	if (item.type !== "image" || typeof item.mimeType !== "string" || !imageMimeTypes.has(item.mimeType) || typeof item.data !== "string" || !item.data.length || !base64.test(item.data)) throw new Error("Submission images require PNG, JPEG, WebP or GIF native base64 image blocks");
+	if (item.type !== "image" || typeof item.mimeType !== "string" || !imageMimeTypes.has(item.mimeType) || typeof item.data !== "string" || !item.data.length || !base64.test(item.data)) throw new Error(tr("提交的图片必须是 PNG、JPEG、WebP 或 GIF 格式的原生 base64 图片块", "Submission images require PNG, JPEG, WebP or GIF native base64 image blocks"));
 	// Padding bits must be zero; accepting a permissive decoder's truncated input
 	// would hide malformed plugin output rather than validate native base64.
-	if ((item.data.endsWith("==") && (alphabet.indexOf(item.data.at(-3)!) & 15) !== 0) || (item.data.endsWith("=") && !item.data.endsWith("==") && (alphabet.indexOf(item.data.at(-2)!) & 3) !== 0)) throw new Error("Submission image data must be canonical base64");
+	if ((item.data.endsWith("==") && (alphabet.indexOf(item.data.at(-3)!) & 15) !== 0) || (item.data.endsWith("=") && !item.data.endsWith("==") && (alphabet.indexOf(item.data.at(-2)!) & 3) !== 0)) throw new Error(tr("提交的图片数据必须是规范的 base64", "Submission image data must be canonical base64"));
 	return Object.freeze({ type: "image", data: item.data, mimeType: item.mimeType });
 }
 function imageList(value: unknown): readonly Readonly<ImageContent>[] {
-	if (!Array.isArray(value)) throw new Error("Submission images must be an array");
+	if (!Array.isArray(value)) throw new Error(tr("提交的图片必须是数组", "Submission images must be an array"));
 	return value.map(preparePluginSubmissionImage);
 }
 /** Detached transport array; structural validation only, with server byte processing still required. */
@@ -140,17 +141,17 @@ export function preparePluginProblemSubmissionImages(value: unknown): PluginProb
 function builtinAnswer(value: unknown): PluginBuiltinSubmissionAnswer {
 	const item = object(value);
 	keys(item, ["dontKnow", "values", "other", "text", "confidence", "images"], ["images"]);
-	if (Object.hasOwn(item, "dontKnow") && typeof item.dontKnow !== "boolean") throw new Error("dontKnow must be boolean");
-	if (Object.hasOwn(item, "values") && (!Array.isArray(item.values) || item.values.some(value => typeof value !== "string"))) throw new Error("Answer values must be strings");
-	for (const key of ["other", "text"] as const) if (Object.hasOwn(item, key) && typeof item[key] !== "string") throw new Error(`Answer ${key} must be a string`);
-	if (Object.hasOwn(item, "confidence") && (typeof item.confidence !== "number" || !Number.isFinite(item.confidence))) throw new Error("Answer confidence must be finite");
+	if (Object.hasOwn(item, "dontKnow") && typeof item.dontKnow !== "boolean") throw new Error(tr("dontKnow 必须是布尔值", "dontKnow must be boolean"));
+	if (Object.hasOwn(item, "values") && (!Array.isArray(item.values) || item.values.some(value => typeof value !== "string"))) throw new Error(tr("答案的 values 必须是字符串", "Answer values must be strings"));
+	for (const key of ["other", "text"] as const) if (Object.hasOwn(item, key) && typeof item[key] !== "string") throw new Error(tr(`答案的 ${key} 必须是字符串`, `Answer ${key} must be a string`));
+	if (Object.hasOwn(item, "confidence") && (typeof item.confidence !== "number" || !Number.isFinite(item.confidence))) throw new Error(tr("答案的把握度必须是有限数值", "Answer confidence must be finite"));
 	return { ...item, images: imageList(item.images) } as unknown as PluginBuiltinSubmissionAnswer;
 }
 function nonempty(value: PluginSubmissionContent): boolean { return !!value.text.trim() || value.images.length > 0; }
 /** Strictly detach and freeze each hook's output; identity can never be returned as input. */
 export function preparePluginSubmission(input: unknown, target: PluginSubmissionTarget): PluginSubmission {
 	const item = object(clonePluginQuestionJson(input));
-	if (item.type !== target.type) throw new Error("Submission type cannot change");
+	if (item.type !== target.type) throw new Error(tr("提交类型不能更改", "Submission type cannot change"));
 	if (item.type === "text" || item.type === "thinking") {
 		keys(item, ["type", "content"]);
 		return freeze({ type: item.type, content: content(item.content) });
@@ -162,7 +163,7 @@ export function preparePluginSubmission(input: unknown, target: PluginSubmission
 	keys(item, item.type === "answer" ? ["type", "answer", "thinking", "readingThinking"] : ["type", "answer", "answerImages", "thinking", "readingThinking"]);
 	const thinking = content(item.thinking), readingThinking = content(item.readingThinking);
 	const channels: readonly PluginSubmissionChannel[] = target.channels;
-	if ((!channels.includes("thinking") && nonempty(thinking)) || (!channels.includes("readingThinking") && nonempty(readingThinking))) throw new Error("Submission channel is not applicable");
+	if ((!channels.includes("thinking") && nonempty(thinking)) || (!channels.includes("readingThinking") && nonempty(readingThinking))) throw new Error(tr("该提交通道不适用", "Submission channel is not applicable"));
 	if (item.type === "answer") return freeze({ type: "answer", answer: builtinAnswer(item.answer), thinking, readingThinking });
 	return freeze({ type: "plugin-question-answer", answer: item.answer as ImmutableJson, answerImages: imageList(item.answerImages), thinking, readingThinking });
 }
@@ -171,16 +172,16 @@ export function preparePluginSubmission(input: unknown, target: PluginSubmission
 export function validatePluginBuiltinSubmissionAnswer(question: QuestionData, answer: PluginBuiltinSubmissionAnswer): AnswerRequest {
 	const raw = builtinAnswer(object(clonePluginQuestionJson(answer)));
 	const values = raw.values ?? [], other = raw.other?.trim() ?? "", text = raw.text?.trim() ?? "";
-	if (new Set(values).size !== values.length || values.some(value => !question.options.some(option => option.value === value))) throw new Error("Answer contains duplicate or unknown option values");
-	if (raw.confidence !== undefined && question.kind !== "quiz") throw new Error("Confidence is only applicable to quiz answers");
+	if (new Set(values).size !== values.length || values.some(value => !question.options.some(option => option.value === value))) throw new Error(tr("答案包含重复或未知的选项值", "Answer contains duplicate or unknown option values"));
+	if (raw.confidence !== undefined && question.kind !== "quiz") throw new Error(tr("把握度仅适用于小测答案", "Confidence is only applicable to quiz answers"));
 	if (question.mode === "text") {
-		if (values.length || other || raw.dontKnow === true) throw new Error("Selection fields are not applicable to text answers");
-		if (!text && !raw.images.length) throw new Error("Answer text or answer images are required");
+		if (values.length || other || raw.dontKnow === true) throw new Error(tr("选项字段不适用于文本答案", "Selection fields are not applicable to text answers"));
+		if (!text && !raw.images.length) throw new Error(tr("需要提供答案文本或答案图片", "Answer text or answer images are required"));
 	} else {
-		if (text || (other && question.kind !== "ask")) throw new Error("Answer field is not applicable to this question");
-		if (raw.dontKnow && (values.length || other)) throw new Error("dontKnow cannot be combined with an answer selection");
-		if (question.mode === "single-select" && values.length + (other ? 1 : 0) > 1) throw new Error("A single-select answer requires one selection");
-		if (!raw.dontKnow && !values.length && !other) throw new Error("An answer selection is required");
+		if (text || (other && question.kind !== "ask")) throw new Error(tr("该答案字段不适用于此问题", "Answer field is not applicable to this question"));
+		if (raw.dontKnow && (values.length || other)) throw new Error(tr("dontKnow 不能与选项同时使用", "dontKnow cannot be combined with an answer selection"));
+		if (question.mode === "single-select" && values.length + (other ? 1 : 0) > 1) throw new Error(tr("单选题只能选择一项", "A single-select answer requires one selection"));
+		if (!raw.dontKnow && !values.length && !other) throw new Error(tr("请选择一个答案", "An answer selection is required"));
 	}
 	// Preserve finite confidence even on dontKnow: existing buildAnswer deliberately
 	// drops it there, and owns rounding/clamping for real quiz selections.

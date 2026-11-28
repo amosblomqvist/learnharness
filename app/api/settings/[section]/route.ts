@@ -47,6 +47,7 @@ import {
 	writeSettingsRecord,
 	type SettingsBodyResult,
 } from "@/src/server";
+import { tr } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	const parser = (SETTINGS_SECTIONS as Record<string, AnySectionParser>)[section];
 	if (!parser) {
 		return Response.json(
-			{ error: `unknown settings section "${section}"`, supported: Object.keys(SETTINGS_SECTIONS) },
+			{ error: tr(`未知的设置分区“${section}”`, `unknown settings section "${section}"`), supported: Object.keys(SETTINGS_SECTIONS) },
 			{ status: 404 },
 		);
 	}
@@ -96,7 +97,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 		const theme = appearance.theme;
 		if (theme !== undefined && !isBuiltinThemeId(theme) && themeStore.readTheme(theme) === null) {
 			if (theme !== record.appearance?.theme) {
-				return Response.json({ error: `unknown theme "${theme}"` }, { status: 400 });
+				return Response.json({ error: tr(`未知的主题“${theme}”`, `unknown theme "${theme}"`) }, { status: 400 });
 			}
 			appearance.theme = "default";
 		}

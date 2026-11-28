@@ -41,5 +41,5 @@ test("a stats-only read preserves the missing-session contract", async () => {
 	const id = "missing-session";
 	const response = await GET(new Request(`http://localhost/api/chats/${id}?view=stats`), { params: Promise.resolve({ id }) });
 	assert.equal(response.status, 404);
-	assert.deepEqual(await response.json(), { error: "Not found" });
+	assert.deepEqual(await response.json(), { error: "未找到" });
 });

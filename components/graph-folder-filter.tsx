@@ -9,6 +9,7 @@ import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { Hint } from "@/components/ui/hint";
 import { TreeCheckbox } from "@/components/tree-presentation";
 import { cn } from "@/lib/utils";
+import { tr } from "@/src/core";
 
 /**
  * The graph's folder filter (approved plan): VIEW ONLY. Ticked folders of the
@@ -102,7 +103,7 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 				<label data-testid={`graph-folder-option-${folder.id}`} className="flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 hover:bg-accent has-[:focus-visible]:bg-accent"
 					style={{ paddingLeft: 8 + depth * 18 }}>
 					<TreeCheckbox data-folder-filter-control checked={check.checked} indeterminate={check.indeterminate}
-						aria-label={`Show folder ${folder.name}`}
+						aria-label={tr(`显示文件夹 ${folder.name}`, `Show folder ${folder.name}`)}
 						onChange={(e) => onChange(toggleGraphFolder(organization, selected, folder.id, e.target.checked, listed))} />
 					<FolderIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
 					<span className="min-w-0 flex-1 truncate text-xs">{folder.name}</span>
@@ -113,12 +114,12 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 	});
 	return (
 		<div ref={rootRef} className="lh-no-drag relative" onKeyDown={walk}>
-			<Hint label={activeCount > 0 ? "Graph filtered by folder" : "Show folders"} side="bottom">
+			<Hint label={activeCount > 0 ? tr("图谱已按文件夹筛选", "Graph filtered by folder") : tr("显示文件夹", "Show folders")} side="bottom">
 				<button
 					type="button"
 					ref={triggerRef}
 					aria-expanded={open}
-					aria-label={soleName !== null ? `Folder filter: ${soleName}` : activeCount > 0 ? `Folder filter: ${activeCount} selected` : "Folder filter"}
+					aria-label={soleName !== null ? tr(`文件夹筛选：${soleName}`, `Folder filter: ${soleName}`) : activeCount > 0 ? tr(`文件夹筛选：已选 ${activeCount} 个`, `Folder filter: ${activeCount} selected`) : tr("文件夹筛选", "Folder filter")}
 					data-testid="graph-folder-filter"
 					data-active={activeCount > 0}
 					onClick={(event) => {
@@ -139,22 +140,22 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 				</button>
 			</Hint>
 			{open && (
-				<div ref={panelRef} role="group" aria-label="Show folders" tabIndex={-1} data-testid="graph-folder-filter-panel" style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
+				<div ref={panelRef} role="group" aria-label={tr("显示文件夹", "Show folders")} tabIndex={-1} data-testid="graph-folder-filter-panel" style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
 					className="absolute left-0 top-full mt-2 flex max-h-[60vh] w-64 flex-col rounded-xl border bg-card/85 p-2 shadow-lg backdrop-blur">
 					<div className="mb-1 flex items-center justify-between gap-2 px-2">
-						<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Show folders</span>
+						<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tr("显示文件夹", "Show folders")}</span>
 						{activeCount > 0 && (
 							<button type="button" data-testid="graph-folder-filter-clear" data-folder-filter-control onClick={() => {
 								// This button disappears once cleared; keep focus inside the popup.
 								(panelRef.current?.querySelector<HTMLElement>("input[data-folder-filter-control]") ?? panelRef.current)?.focus();
 								onChange(new Set());
 							}}
-								className="text-[10px] text-muted-foreground transition-colors hover:text-foreground">Show all</button>
+								className="text-[10px] text-muted-foreground transition-colors hover:text-foreground">{tr("显示全部", "Show all")}</button>
 						)}
 					</div>
 					<div className="overflow-y-auto">
 						{listed.size === 0
-							? <p className="px-2 py-1 text-xs text-muted-foreground">No folders contain graph material yet.</p>
+							? <p className="px-2 py-1 text-xs text-muted-foreground">{tr("还没有包含图谱内容的文件夹。", "No folders contain graph material yet.")}</p>
 							: renderLevel(null, 0)}
 					</div>
 				</div>

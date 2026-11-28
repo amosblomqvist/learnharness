@@ -7,5 +7,11 @@
   "description": "Draw over read-only question references and send your working with learner submissions.",
   "main": "main.js",
   "backend": "backend.cjs",
-  "styles": "styles.css"
+  "styles": "styles.css",
+  "locales": {
+    "zh": {
+      "name": "画板",
+      "description": "在只读的题目参考上绘图，并随提交一并发送你的解题过程。"
+    }
+  }
 }

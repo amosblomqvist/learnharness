@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { MermaidErrorComponentProps } from "streamdown";
+import { tr } from "@/src/core";
 
 /**
  * Fallback for mermaid diagrams that fail to parse — wired via Streamdown's
@@ -25,7 +26,7 @@ export const MermaidError = ({
 		data-streamdown="mermaid-error"
 	>
 		<p className="text-sm font-medium text-destructive">
-			Diagram failed to render
+			{tr("图表渲染失败", "Diagram failed to render")}
 		</p>
 		<p className="mt-1 font-mono text-xs break-words text-muted-foreground">
 			{error}
@@ -36,14 +37,14 @@ export const MermaidError = ({
 			</pre>
 		) : <details className="mt-3">
 			<summary className="cursor-pointer text-xs text-muted-foreground">
-				Show diagram source
+				{tr("显示图表源码", "Show diagram source")}
 			</summary>
 			<pre className="mt-2 overflow-x-auto rounded-lg bg-muted p-3 font-mono text-xs text-foreground">
 				{chart}
 			</pre>
 		</details>}
 		{!displayOnly && <Button className="mt-3" onClick={retry} size="sm" variant="outline">
-			Retry
+			{tr("重试", "Retry")}
 		</Button>}
 	</div>
 );

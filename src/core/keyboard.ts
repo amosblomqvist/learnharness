@@ -19,6 +19,7 @@
  * Order is fixed: mod, alt, shift, then the key.
  */
 
+import { tr } from "./i18n.ts";
 export type KeyAction =
 	| "toggle-dictation"
 	| "open-model-picker"
@@ -56,37 +57,37 @@ export interface KeyActionDef {
 }
 
 export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
-	{ id: "toggle-dictation", label: "Toggle dictation", scope: "global", binding: "mod+d" },
-	{ id: "open-settings", label: "Open settings", scope: "global", binding: "mod+," },
-	{ id: "open-model-picker", label: "Model selector", scope: "global", binding: "mod+k" },
-	{ id: "cycle-thinking", label: "Cycle thinking level", scope: "global", binding: "shift+tab" },
-	{ id: "toggle-sidebar", label: "Toggle sessions sidebar", scope: "global", binding: "mod+b" },
-	{ id: "sessions-search", label: "Search sessions", scope: "global", binding: "mod+shift+f" },
+	{ id: "toggle-dictation", label: tr("开关语音听写", "Toggle dictation"), scope: "global", binding: "mod+d" },
+	{ id: "open-settings", label: tr("打开设置", "Open settings"), scope: "global", binding: "mod+," },
+	{ id: "open-model-picker", label: tr("模型选择器", "Model selector"), scope: "global", binding: "mod+k" },
+	{ id: "cycle-thinking", label: tr("切换推理强度", "Cycle thinking level"), scope: "global", binding: "shift+tab" },
+	{ id: "toggle-sidebar", label: tr("显示/隐藏会话侧边栏", "Toggle sessions sidebar"), scope: "global", binding: "mod+b" },
+	{ id: "sessions-search", label: tr("搜索会话", "Search sessions"), scope: "global", binding: "mod+shift+f" },
 	// (The Alt+↑/↓/↵ session cycle was RETIRED, owner 2026-10-10: barely
 	// used, felt laggy. Session navigation lives IN the search now — ↑/↓
 	// walk the filtered list, Enter opens (first match when nothing
 	// walked) — see sidebar.tsx's search input.)
-	{ id: "jump-graph", label: "Graph view", scope: "global", binding: "mod+g" },
-	{ id: "new-session", label: "New session", scope: "global", binding: "mod+n" },
-	{ id: "rename-session", label: "Rename session", scope: "chat", binding: "f2" },
-	{ id: "toggle-user-thinking", label: "Toggle all your thinking", scope: "chat", binding: "mod+t" },
-	{ id: "toggle-question-thread", label: "Question · ask for a nudge (side thread)", scope: "chat", binding: "mod+j" },
+	{ id: "jump-graph", label: tr("图谱视图", "Graph view"), scope: "global", binding: "mod+g" },
+	{ id: "new-session", label: tr("新建会话", "New session"), scope: "global", binding: "mod+n" },
+	{ id: "rename-session", label: tr("重命名会话", "Rename session"), scope: "chat", binding: "f2" },
+	{ id: "toggle-user-thinking", label: tr("展开/收起你的全部思考", "Toggle all your thinking"), scope: "chat", binding: "mod+t" },
+	{ id: "toggle-question-thread", label: tr("问题 · 请求提示（旁支提问）", "Question · ask for a nudge (side thread)"), scope: "chat", binding: "mod+j" },
 	// Mod+F is surface-scoped: graph node search and session text Find share
 	// one action/binding. Only the currently mounted surface listens.
-	{ id: "find", label: "Find", scope: "global", binding: "mod+f" },
-	{ id: "cheat-sheet", label: "Shortcut cheat sheet", scope: "global", binding: "?" },
+	{ id: "find", label: tr("查找", "Find"), scope: "global", binding: "mod+f" },
+	{ id: "cheat-sheet", label: tr("快捷键速查表", "Shortcut cheat sheet"), scope: "global", binding: "?" },
 	// The question dock's row machine (wave B) — displayOnly: the dock owns
 	// the keys while a question is expanded; the registry never dispatches
 	// them, so bare arrows stay free everywhere else.
-	{ id: "question-focus", label: "Question · focus thinking ↔ rows", scope: "chat", binding: "tab", displayOnly: true },
+	{ id: "question-focus", label: tr("问题 · 在思考与选项间切换焦点", "Question · focus thinking ↔ rows"), scope: "chat", binding: "tab", displayOnly: true },
 	// (The model-menu entries — "walk results" ↑/↓, "pick result" ↵ — were
 	// REMOVED, owner 2026-10-10: obvious in-field menu navigation, never
 	// dispatched, never rebindable — not settings material. The menu's own
 	// arrow machine (menu-shell.tsx) is unchanged.)
-	{ id: "question-next-row", label: "Question · next row", scope: "chat", binding: "arrowdown", displayOnly: true },
-	{ id: "question-prev-row", label: "Question · previous row", scope: "chat", binding: "arrowup", displayOnly: true },
-	{ id: "question-pick-row", label: "Question · pick row", scope: "chat", binding: "space", displayOnly: true },
-	{ id: "question-submit", label: "Question · submit", scope: "chat", binding: "enter", displayOnly: true },
+	{ id: "question-next-row", label: tr("问题 · 下一项", "Question · next row"), scope: "chat", binding: "arrowdown", displayOnly: true },
+	{ id: "question-prev-row", label: tr("问题 · 上一项", "Question · previous row"), scope: "chat", binding: "arrowup", displayOnly: true },
+	{ id: "question-pick-row", label: tr("问题 · 选择当前项", "Question · pick row"), scope: "chat", binding: "space", displayOnly: true },
+	{ id: "question-submit", label: tr("问题 · 提交", "Question · submit"), scope: "chat", binding: "enter", displayOnly: true },
 ];
 
 export type KeymapAction = KeyAction | `plugin:${string}:${string}`;

@@ -1,4 +1,5 @@
 import type { ChatKind } from "./contracts/chat.ts";
+import { tr } from "./i18n.ts";
 
 /** Source organization is presentation metadata, never graph/extraction identity.
  * A source has one parent; folders have stable IDs independent of names/paths. */
@@ -69,7 +70,7 @@ export function canMoveFolder(state: SourceOrganization, id: string, parentId: s
 
 /** Reject unsupported/corrupt data rather than overwrite organization on a write. */
 export function parseSourceOrganization(raw: unknown): SourceOrganization {
-	const fail = (): never => { throw new Error("Could not read source organization. Its data is invalid or newer than this app."); };
+	const fail = (): never => { throw new Error(tr("无法读取来源的整理结构：其数据无效，或由更新版本的应用写入。", "Could not read source organization. Its data is invalid or newer than this app.")); };
 	if (!raw || typeof raw !== "object") return fail();
 	const r = raw as Partial<SourceOrganization>;
 	if (r.version !== 1 || !Array.isArray(r.folders) || !r.placements || typeof r.placements !== "object" || Array.isArray(r.placements)) return fail();
@@ -90,19 +91,19 @@ export function parseSourceOrganization(raw: unknown): SourceOrganization {
 }
 
 export function parseOrganizationAction(raw: unknown): OrganizationAction {
-	if (!raw || typeof raw !== "object") throw new Error("Invalid source organization action.");
+	if (!raw || typeof raw !== "object") throw new Error(tr("无效的来源整理操作。", "Invalid source organization action."));
 	const r = raw as Record<string, unknown>;
-	const id = () => { if (typeof r.id !== "string" || !r.id) throw new Error("A source or folder ID is required."); return r.id; };
-	const name = () => { if (typeof r.name !== "string" || !r.name.trim()) throw new Error("Name must be a non-empty string."); return r.name.trim(); };
-	const parent = () => { if (r.parentId !== null && typeof r.parentId !== "string") throw new Error("Invalid parent folder."); return r.parentId; };
+	const id = () => { if (typeof r.id !== "string" || !r.id) throw new Error(tr("需要提供来源或文件夹 ID。", "A source or folder ID is required.")); return r.id; };
+	const name = () => { if (typeof r.name !== "string" || !r.name.trim()) throw new Error(tr("名称不能为空。", "Name must be a non-empty string.")); return r.name.trim(); };
+	const parent = () => { if (r.parentId !== null && typeof r.parentId !== "string") throw new Error(tr("上级文件夹无效。", "Invalid parent folder.")); return r.parentId; };
 	switch (r.action) {
 		case "create-folder": return { action: r.action, name: name(), parentId: parent() };
 		case "rename-folder": case "rename-source": return { action: r.action, id: id(), name: name() };
 		case "delete-folder": return { action: r.action, id: id() };
 		case "move":
-			if (r.kind !== "source" && r.kind !== "folder") throw new Error("Invalid move kind.");
+			if (r.kind !== "source" && r.kind !== "folder") throw new Error(tr("无效的移动类型。", "Invalid move kind."));
 			return { action: r.action, id: id(), kind: r.kind, parentId: parent() };
-		default: throw new Error("Unknown source organization action.");
+		default: throw new Error(tr("未知的来源整理操作。", "Unknown source organization action."));
 	}
 }
 
@@ -110,24 +111,24 @@ export function parseOrganizationAction(raw: unknown): OrganizationAction {
 export function applyOrganizationAction(state: SourceOrganization, action: Exclude<OrganizationAction, { action: "rename-source" }>,
 	sourceIds: ReadonlySet<string>, newFolder: { id: string; createdAt: string }): SourceOrganization {
 	const next = structuredClone(state);
-	if ("parentId" in action && action.parentId !== null && !next.folders.some((f) => f.id === action.parentId)) throw new Error("Parent folder no longer exists.");
+	if ("parentId" in action && action.parentId !== null && !next.folders.some((f) => f.id === action.parentId)) throw new Error(tr("上级文件夹已不存在。", "Parent folder no longer exists."));
 	if (action.action === "create-folder") {
 		next.folders.push({ ...newFolder, name: action.name, parentId: action.parentId });
 		return next;
 	}
 	if (action.action === "move" && action.kind === "source") {
-		if (!sourceIds.has(action.id)) throw new Error("Source no longer exists.");
+		if (!sourceIds.has(action.id)) throw new Error(tr("来源已不存在。", "Source no longer exists."));
 		next.placements = { ...next.placements, [action.id]: { ...placementOf(next, action.id), folderId: action.parentId } };
 		return next;
 	}
 	const folder = next.folders.find((f) => f.id === action.id);
-	if (!folder) throw new Error("Folder no longer exists.");
+	if (!folder) throw new Error(tr("文件夹已不存在。", "Folder no longer exists."));
 	if (action.action === "rename-folder") folder.name = action.name;
 	else if (action.action === "move") {
-		if (!canMoveFolder(next, action.id, action.parentId)) throw new Error("A folder cannot be moved into itself or its descendants.");
+		if (!canMoveFolder(next, action.id, action.parentId)) throw new Error(tr("文件夹不能移动到自身或其子文件夹中。", "A folder cannot be moved into itself or its descendants."));
 		folder.parentId = action.parentId;
 	} else {
-		if (!folderIsEmpty(next, action.id, sourceIds)) throw new Error("Only empty folders can be removed. Move their entries out first.");
+		if (!folderIsEmpty(next, action.id, sourceIds)) throw new Error(tr("只能删除空文件夹。请先将其中的内容移出。", "Only empty folders can be removed. Move their entries out first."));
 		next.folders = next.folders.filter((f) => f.id !== action.id);
 		for (const [id, p] of Object.entries(next.placements)) if (p.folderId === action.id) next.placements[id] = { ...p, folderId: null };
 	}

@@ -7,6 +7,7 @@ import {
 	applyOrganizationAction, parseOrganizationAction, placeImportedSource, placementOf,
 	type SourceDirectory, type SourceEntry,
 } from "../core/source-organization.ts";
+import { tr } from "../core/i18n.ts";
 
 export class SourceOrganizationInputError extends Error {}
 
@@ -34,7 +35,7 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 		const directory = read();
 		if (action.action === "rename-source") {
 			const entry = directory.sources.find((s) => s.id === action.id);
-			if (!entry || entry.kind === "missing") throw new SourceOrganizationInputError("Source no longer exists.");
+			if (!entry || entry.kind === "missing") throw new SourceOrganizationInputError(tr("该来源已不存在。", "Source no longer exists."));
 			if (entry.kind === "chat") deps.chatStore.renameChat(entry.id, action.name);
 			else {
 				const state = directory.organization;
@@ -77,10 +78,10 @@ export async function readOrganizationAction(request: Request): Promise<unknown>
 	const limit = 64 * 1024;
 	if (Number(request.headers.get("content-length")) > limit) {
 		void request.body?.cancel().catch(() => undefined);
-		throw new SourceOrganizationInputError("Source organization request is too large.");
+		throw new SourceOrganizationInputError(tr("来源整理请求过大。", "Source organization request is too large."));
 	}
 	const reader = request.body?.getReader();
-	if (!reader) throw new SourceOrganizationInputError("Missing source organization action.");
+	if (!reader) throw new SourceOrganizationInputError(tr("缺少来源整理操作。", "Missing source organization action."));
 	const chunks: Uint8Array[] = [];
 	let total = 0;
 	try {
@@ -88,7 +89,7 @@ export async function readOrganizationAction(request: Request): Promise<unknown>
 			const { value, done } = await reader.read();
 			if (done) break;
 			total += value.byteLength;
-			if (total > limit) throw new SourceOrganizationInputError("Source organization request is too large.");
+			if (total > limit) throw new SourceOrganizationInputError(tr("来源整理请求过大。", "Source organization request is too large."));
 			chunks.push(value);
 		}
 		const bytes = new Uint8Array(total);
@@ -97,7 +98,7 @@ export async function readOrganizationAction(request: Request): Promise<unknown>
 		return JSON.parse(new TextDecoder().decode(bytes));
 	} catch (error) {
 		if (error instanceof SourceOrganizationInputError) throw error;
-		throw new SourceOrganizationInputError("Could not read source organization action.");
+		throw new SourceOrganizationInputError(tr("无法读取来源整理操作。", "Could not read source organization action."));
 	} finally {
 		void reader.cancel().catch(() => undefined);
 		reader.releaseLock();

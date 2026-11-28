@@ -417,7 +417,7 @@ test("unsupported native tool intent fails without exposing executable calls", a
 	]);
 
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
-	assert.match(getErrorMessage(events) ?? "", /unsupported native tool/);
+	assert.match(getErrorMessage(events) ?? "", /发出了不受支持的原生工具调用/);
 });
 
 function bareToolUse(index: number, toolUse: ToolUse): string[] {
@@ -548,17 +548,17 @@ test("a bare-only rejection may finish with ordinary text instead of an MCP retr
 	const bare: ToolUse = { id: "toolu_bare_before_failure", name: "read", arguments: { path: "a" } };
 	const retry: ToolUse = { ...bare, id: "toolu_retry_before_failure" };
 	const failures = [
-		{ name: "an unknown native Bash call", lines: toBareToolUseMessage([{ ...retry, name: "Bash" }]), error: /unsupported native tool/ },
-		{ name: "a bare tool absent from the current declarations", lines: toBareToolUseMessage([{ ...retry, name: "send_to_user" }]), error: /unsupported native tool/ },
-		{ name: "an empty tool-use batch in the next message", lines: toToolUseMessage([]), error: /invalid tool batch/ },
-		{ name: "duplicate corrected intent IDs", lines: toToolUseMessage([retry, retry]), error: /invalid tool batch/ },
-		{ name: "a prefixed retry with no MCP request", lines: [...toToolUseMessage([retry]), exitWith(1, "")], error: /exited with code 1/ },
-		{ name: "a prefixed retry rejected before MCP admission", lines: [...toToolUseMessage([retry]), rejectBareCall(retry)], error: /refused.*before MCP admission/ },
+		{ name: "an unknown native Bash call", lines: toBareToolUseMessage([{ ...retry, name: "Bash" }]), error: /发出了不受支持的原生工具调用/ },
+		{ name: "a bare tool absent from the current declarations", lines: toBareToolUseMessage([{ ...retry, name: "send_to_user" }]), error: /发出了不受支持的原生工具调用/ },
+		{ name: "an empty tool-use batch in the next message", lines: toToolUseMessage([]), error: /发出了无效的工具调用批次/ },
+		{ name: "duplicate corrected intent IDs", lines: toToolUseMessage([retry, retry]), error: /发出了无效的工具调用批次/ },
+		{ name: "a prefixed retry with no MCP request", lines: [...toToolUseMessage([retry]), exitWith(1, "")], error: /已退出，退出码 1/ },
+		{ name: "a prefixed retry rejected before MCP admission", lines: [...toToolUseMessage([retry]), rejectBareCall(retry)], error: /在 MCP 接收前拒绝了/ },
 		{ name: "missing MCP identity", lines: [...toToolUseMessage([retry]), JSON.stringify({ fake: "call", name: retry.name, arguments: retry.arguments })], error: /compatibility error.*claudecode\/toolUseId/ },
-		{ name: "mismatched MCP identity", lines: [...toToolUseMessage([retry]), callTool({ ...retry, id: "toolu_not_the_retry" })], error: /does not match its streamed tool intent/ },
-		{ name: "mismatched MCP arguments", lines: [...toToolUseMessage([retry]), callTool({ ...retry, arguments: { path: "different" } })], error: /does not match its streamed tool intent/ },
+		{ name: "mismatched MCP identity", lines: [...toToolUseMessage([retry]), callTool({ ...retry, id: "toolu_not_the_retry" })], error: /MCP 调用与其流式返回的工具意图不一致/ },
+		{ name: "mismatched MCP arguments", lines: [...toToolUseMessage([retry]), callTool({ ...retry, arguments: { path: "different" } })], error: /MCP 调用与其流式返回的工具意图不一致/ },
 		{ name: "a terminal CLI error", lines: [JSON.stringify({ type: "result", is_error: true, result: "Synthetic CLI failure" })], error: /Synthetic CLI failure/ },
-		{ name: "CLI exit before correction", lines: [exitWith(1, "")], error: /exited with code 1/ },
+		{ name: "CLI exit before correction", lines: [exitWith(1, "")], error: /已退出，退出码 1/ },
 	];
 	for (const failure of failures) test(`bare-call tolerance still rejects ${failure.name}`, async (t) => {
 		const { events, calls } = await runScenario(t, [
@@ -574,7 +574,7 @@ test("a bare name from a removed tool is not tolerated when no tools are declare
 	const bare: ToolUse = { id: "toolu_removed_read", name: "read", arguments: {} };
 	const { runClaude, calls } = createFakeRun(t, [...toBareToolUseMessage([bare]), HOLD]);
 	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [] })));
-	assert.match(getErrorMessage(events) ?? "", /unsupported native tool/);
+	assert.match(getErrorMessage(events) ?? "", /发出了不受支持的原生工具调用/);
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
 	await assertCleanedUp(getOnlyCall(calls));
 });
@@ -680,7 +680,7 @@ test("result error without result text surfaces its errors", async (t) => {
 test("result error without result text or errors surfaces its subtype", async (t) => {
 	const resultError = JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true });
 	const { events } = await runScenario(t, [resultError, HOLD]);
-	assert.equal(getErrorMessage(events), "claude CLI failed: error_during_execution");
+	assert.equal(getErrorMessage(events), "claude CLI 执行失败：error_during_execution");
 });
 
 test("refusal stop reason → error", async (t) => {
@@ -689,7 +689,7 @@ test("refusal stop reason → error", async (t) => {
 		streamEvent({ type: "message_delta", delta: { stop_reason: "refusal" }, usage: {} }),
 		streamEvent({ type: "message_stop" }),
 	]);
-	assert.equal(getErrorMessage(events), "The model refused to complete the request");
+	assert.equal(getErrorMessage(events), "模型拒绝完成此请求");
 });
 
 /** What the CLI streams when a response breaks off and it retries: the open block closed, then a marked message_stop. */
@@ -738,7 +738,7 @@ test("a non-streamed fallback answer after an abandoned attempt fails the turn i
 		HOLD,
 	]);
 
-	assert.equal(getErrorMessage(events), "claude CLI finished without streaming its response");
+	assert.equal(getErrorMessage(events), "claude CLI 已结束，但未流式返回回复");
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
@@ -747,7 +747,7 @@ test("a tool call from a non-streamed fallback answer is never admitted", async 
 	const { events, calls } = await runScenario(t, [...abandonedAttempt([OPEN_THINKING], 0), NON_STREAMED_ANSWER, JSON.stringify({ fake: "start-call", ...JSON.parse(callTool(readA)) }), HOLD]);
 
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
-	assert.match(getErrorMessage(events) ?? "", /did not stream/);
+	assert.match(getErrorMessage(events) ?? "", /来自未流式返回回复的工具/);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
@@ -761,7 +761,7 @@ test("non-zero exit mid-stream → error naming the exit code, stderr logged not
 		["start", "text_start", "text_delta", "error"],
 	);
 
-	assert.equal(getErrorMessage(events), "claude CLI exited with code 1");
+	assert.equal(getErrorMessage(events), "claude CLI 已退出，退出码 1");
 	assert.ok(
 		consoleError.mock.calls.some((call) => call.arguments.some((argument) => String(argument).includes("ENOENT /home/someone/.claude/x"))),
 	);
@@ -776,7 +776,7 @@ test("non-zero exit mid-stream → error naming the exit code, stderr logged not
 
 test("exit without stderr names the exit code", async (t) => {
 	const { events } = await runScenario(t, [exitWith(3, "")]);
-	assert.equal(getErrorMessage(events), "claude CLI exited with code 3");
+	assert.equal(getErrorMessage(events), "claude CLI 已退出，退出码 3");
 });
 
 test("abort kills the process and ends with error(aborted)", async (t) => {
@@ -1233,7 +1233,7 @@ test("output while waiting for tool results kills the process", async (t) => {
 	const readA: ToolUse = { id: "toolu_moved_on_a", name: "read", arguments: { path: "a" } };
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([readA]), REPLY, HOLD]);
 	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] })));
-	assert.match(getErrorMessage(events) ?? "", /moved on without admitting/);
+	assert.match(getErrorMessage(events) ?? "", /未接收其 LearnHarness 工具调用就继续执行了/);
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
 	await assertCleanedUp(getOnlyCall(calls));
 });
@@ -1244,7 +1244,7 @@ test("unadmitted tool intent never becomes an executable call", async (t) => {
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([readA, nope]), exitWith(1, "tool denied")]);
 	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] })));
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
-	assert.match(getErrorMessage(events) ?? "", /exited with code 1/);
+	assert.match(getErrorMessage(events) ?? "", /已退出，退出码 1/);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
@@ -1266,7 +1266,7 @@ test("a CLI-rejected malformed call is not exposed for execution", async (t) => 
 
 	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] })));
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
-	assert.match(getErrorMessage(events) ?? "", /refused.*before MCP admission/);
+	assert.match(getErrorMessage(events) ?? "", /在 MCP 接收前拒绝了/);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
@@ -1375,7 +1375,7 @@ test("CLI denial cannot execute a tool in the native Pi loop", async (t) => {
 	const last = agent.state.messages.at(-1);
 	assert.ok(last?.role === "assistant");
 	assert.equal(last.stopReason, "error");
-	assert.match(last.errorMessage ?? "", /refused.*before MCP admission/);
+	assert.match(last.errorMessage ?? "", /在 MCP 接收前拒绝了/);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
@@ -1457,7 +1457,7 @@ test("output after MCP admission fails continuation instead of silently replayin
 	getOnlyCall(calls).child.send("continue");
 	await waitForExit(getOnlyCall(calls).child);
 	const events = await collectEvents(stream(getModel(), normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI, message, toToolResult(call, "A")], tools: [READ_TOOL] }), { sessionId: SESSION_ID }));
-	assert.match(getErrorMessage(events) ?? "", /moved on while.*waiting for results/);
+	assert.match(getErrorMessage(events) ?? "", /工具调用仍在等待结果时，claude CLI 已继续执行/);
 	assert.equal(calls.length, 1);
 	await assertCleanedUp(getOnlyCall(calls));
 });
@@ -1478,7 +1478,7 @@ for (const asyncVersionFailure of [false, true]) test(`${asyncVersionFailure ? "
 		throw new Error("synthetic spawn failure");
 	});
 	const events = await collectEvents(stream(getModel(), normalizeContext({ messages: [HI] })));
-	assert.match(getErrorMessage(events) ?? "", asyncVersionFailure ? /requires an update/ : /failed to start/);
+	assert.match(getErrorMessage(events) ?? "", asyncVersionFailure ? /requires an update/ : /启动失败/);
 	assert.ok(resources);
 	assert.equal(existsSync(resources.cwd), false);
 	assert.equal(existsSync(resources.privateDir), false);
@@ -1487,7 +1487,7 @@ for (const asyncVersionFailure of [false, true]) test(`${asyncVersionFailure ? "
 
 test("a malformed JSON event shape fails the turn rather than escaping the readline handler", async (t) => {
 	const { events, calls } = await runScenario(t, [JSON.stringify({ type: "assistant", error: "bad", message: { content: [null] } }), HOLD]);
-	assert.match(getErrorMessage(events) ?? "", /malformed stream output/);
+	assert.match(getErrorMessage(events) ?? "", /输出了格式错误的流数据/);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
@@ -1496,7 +1496,7 @@ test("a mismatched MCP identity cannot admit a streamed call", async (t) => {
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([read]), callTool({ ...read, id: "toolu_someone_else" })]);
 	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] })));
 	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
-	assert.match(getErrorMessage(events) ?? "", /does not match its streamed tool intent/);
+	assert.match(getErrorMessage(events) ?? "", /MCP 调用与其流式返回的工具意图不一致/);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 

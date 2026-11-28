@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { PluginBackendContext } from "learnharness-plugin-api";
 import { DEFAULT_SETTINGS, parseColorChange, parseImageScaleChange, parseSettings, type Settings } from "./settings.ts";
 import { acceptedPoseKeys } from "./poses.ts";
+import { tr } from "./i18n.ts";
 
 /** The backend stores preferences only. Editable drawings never leave window memory. */
 export function activate(ctx: PluginBackendContext): () => void {
@@ -16,7 +17,7 @@ export function activate(ctx: PluginBackendContext): () => void {
   }
   let disposed = false;
   const assertActive = () => {
-    if (disposed || ctx.signal.aborted) throw new Error("Drawing Pad is disabled.");
+    if (disposed || ctx.signal.aborted) throw new Error(tr("画板已停用。", "Drawing Pad is disabled."));
   };
   const get = ctx.handle("get-settings", () => { assertActive(); return { ...settings }; });
   const poses = ctx.handle("get-session-poses", input => {

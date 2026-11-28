@@ -18,7 +18,7 @@ const answer = buildAnswer(qd, { text: "" });
 
 test("submitted images use explicit bytes, prose-sized previews, and no extra toolbar", () => {
 	const html = renderToStaticMarkup(<SubmittedImages images={[image]} />);
-	assert.match(html, /<figure[^>]*mx-auto[^>]*w-fit/); assert.match(html, /alt="Submitted image"/); assert.match(html, /data:image\/png;base64,iVBORw0KGgo=/);
+	assert.match(html, /<figure[^>]*mx-auto[^>]*w-fit/); assert.match(html, /alt="已提交的图片"/); assert.match(html, /data:image\/png;base64,iVBORw0KGgo=/);
 	assert.match(html, /opacity-100/); assert.match(html, /--lh-prose-size/); assert.match(html, /--lh-prose-leading/);
 	assert.match(html, /max-height:calc\([^;]*\* 5\)/); assert.match(html, /max-width:min\(100%, calc\(/);
 	assert.doesNotMatch(html, /60vh|download|invert/);
@@ -27,12 +27,12 @@ test("submitted images use explicit bytes, prose-sized previews, and no extra to
 
 test("image-only practice thinking, question thinking, reading and answer containers remain visible at full pixel opacity", () => {
 	const thinking = renderToStaticMarkup(<ThinkingBlock text="" images={[image]} defaultOpen />);
-	assert.match(thinking, /Submitted image/); assert.doesNotMatch(thinking, /text-foreground\/50[^>]*><[^>]*img/);
-	assert.match(renderToStaticMarkup(<ThinkingCard data={{ text: "", problemCallId: "problem", images: [image] }} />), /Submitted image/);
+	assert.match(thinking, /已提交的图片/); assert.doesNotMatch(thinking, /text-foreground\/50[^>]*><[^>]*img/);
+	assert.match(renderToStaticMarkup(<ThinkingCard data={{ text: "", problemCallId: "problem", images: [image] }} />), /已提交的图片/);
 	const html = renderToStaticMarkup(<AnsweredCard answer={{ ...answer, images: { answer: [image], thinking: [image], readingThinking: [image] } }} />);
 	assert.match(html, /reading-thinking-block/); assert.match(html, /your-thinking/);
 	// Answer and reading are open initially; question thinking retains its native collapse policy.
-	assert.equal((html.match(/alt="Submitted image"/g) ?? []).length, 2);
+	assert.equal((html.match(/alt="已提交的图片"/g) ?? []).length, 2);
 	assert.match(renderToStaticMarkup(<ThinkingBlock text="drawing.png" defaultOpen />), /drawing.png/);
 	assert.doesNotMatch(renderToStaticMarkup(<ThinkingBlock text="drawing.png" defaultOpen />), /<img/);
 });
@@ -40,7 +40,7 @@ test("image-only practice thinking, question thinking, reading and answer contai
 test("pending image input makes an empty between-problems composer send rather than Next", () => {
 	assert.equal(enterAction({ busy: false, canSend: true, nextProblem: true }), "send");
 	const html = renderToStaticMarkup(<ChatSessionComposer busy={false} value="" revision={0} pendingInput onChange={() => {}} onSend={() => {}} onStop={() => {}} sendAllowed dictationActive={false} nextProblem />);
-	assert.match(html, /aria-label="Send"/); assert.doesNotMatch(html, /next-problem-button/);
+	assert.match(html, /aria-label="发送"/); assert.doesNotMatch(html, /next-problem-button/);
 });
 
 let cleanup: (() => Promise<void>) | undefined;
@@ -63,7 +63,7 @@ test("builtin pending input enables an initially empty selection and crosses pre
 	assert.equal(button().hasAttribute("disabled"), true);
 	pending = true; preparing = true; await render(); assert.equal(button().hasAttribute("disabled"), true);
 	await act(async () => { document.querySelector("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
-	assert.equal(preparations, 0); assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel/);
+	assert.equal(preparations, 0); assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel|准备提交|取消/);
 	preparing = false; await render(); assert.equal(button().hasAttribute("disabled"), false);
 	await act(async () => { document.querySelector("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
 	assert.equal(preparations, 1);
@@ -72,5 +72,5 @@ test("builtin pending input enables an initially empty selection and crosses pre
 	const transformed = validatePluginBuiltinSubmissionAnswer(rendered, { values: ["right"], confidence: 67.8, images: [] });
 	const graded = buildAnswer(rendered, transformed, "quiz"); assert.equal(graded.correct, true); assert.equal(graded.confidence, 68);
 	assert.equal(graded.answers[0]!.index, rendered.options.findIndex(option => option.value === "right") + 1);
-	assert.throws(() => validatePluginBuiltinSubmissionAnswer(rendered!, { values: ["unknown"], images: [] }), /unknown/);
+	assert.throws(() => validatePluginBuiltinSubmissionAnswer(rendered!, { values: ["unknown"], images: [] }), /答案包含重复或未知的选项值/);
 });

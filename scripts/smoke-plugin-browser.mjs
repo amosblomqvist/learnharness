@@ -23,16 +23,16 @@ import { PLUGIN_KNOWLEDGE_FIXTURE as KNOWLEDGE, PLUGIN_PICKER_SETTINGS_FIXTURE a
 const PLUGIN = "/api/plugins/native-smoke";
 const VIEW = "/plugins/native-smoke/proof";
 const ROW = '[data-testid="plugin-native-smoke"]';
-const TOGGLE = `${ROW} [role="switch"][aria-label="Enable Runtime proof"]`;
+const TOGGLE = `${ROW} [role="switch"][aria-label="启用 Runtime proof"]`;
 const SIDEBAR_LINK = '[data-plugin-action="native-smoke/open-sidebar"]';
 const MOUNT = 'main div[aria-label="Runtime proof"]';
 const WORKER_ROW = '[data-testid="activity-blob-plugin-worker"]';
-const CONCURRENCY_INPUT = 'input[type="number"][aria-label="Concurrent worker requests"]';
+const CONCURRENCY_INPUT = 'input[type="number"][aria-label="后台并发请求数"]';
 const KNOWLEDGE_OVERLAY = '[data-testid="chain-table-overlay"]';
 const KNOWLEDGE_CHIP = `${MOUNT} [data-testid="practice-props-chip"]`;
 const PICKER_DIALOG = '[role="dialog"][aria-label="Picker dialog proof"] [data-plugin-ui-dialog]';
 const PICKER_SETTINGS_ROW = `[data-testid="plugin-${PICKER_SETTINGS.id}"]`;
-const PICKER_SETTINGS_TOGGLE = `${PICKER_SETTINGS_ROW} [role="switch"][aria-label="Enable ${PICKER_SETTINGS.name}"]`;
+const PICKER_SETTINGS_TOGGLE = `${PICKER_SETTINGS_ROW} [role="switch"][aria-label="启用 ${PICKER_SETTINGS.name}"]`;
 
 async function chromeExecutable(supplied) {
 	const candidates = supplied ? [supplied] : [
@@ -327,7 +327,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 			return state && JSON.stringify(JSON.parse(state.textContent).sort()) === JSON.stringify([...ids].sort())
 				&& Number(state.dataset.callbacks) === callbacks;
 		}, {}, { mount: MOUNT, ids, callbacks });
-		assert.equal(await page.$eval(KNOWLEDGE_CHIP, chip => chip.textContent.trim()), ids.length ? `${ids.length} ${ids.length === 1 ? "node" : "nodes"} selected` : "Pick nodes");
+		assert.equal(await page.$eval(KNOWLEDGE_CHIP, chip => chip.textContent.trim()), ids.length ? `已选 ${ids.length} 个节点` : "选择节点");
 		evidence.knowledge.push({ label, ids: [...ids], callbacks });
 	};
 	const expandKnowledge = async testid => {
@@ -380,7 +380,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		assert.equal(snapshot.draft, origin.draft);
 		assert.deepEqual([...snapshot.ids].sort(), [...ids].sort());
 		assert.equal(snapshot.callbacks, callbacks);
-		assert.equal(snapshot.chip, ids.length ? `${ids.length} ${ids.length === 1 ? "node" : "nodes"} selected` : "Pick nodes");
+		assert.equal(snapshot.chip, ids.length ? `已选 ${ids.length} 个节点` : "选择节点");
 		assert.equal(snapshot.inert, inactive, "Painted covered origins are inactive; resumed origins become interactive again");
 		evidence.foreground.push({ label, painted: true, inactive, focused, ...snapshot });
 	};
@@ -494,7 +494,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await markdownAction(scope, "invalid");
 		await page.waitForFunction(selector => {
 			const output = document.querySelector(selector), error = output?.querySelector('[data-streamdown="mermaid-error"]'), source = error?.querySelector("pre");
-			return output?.querySelector("h1")?.textContent === "Invalid diagram proof" && error?.textContent.includes("Diagram failed to render") && source?.textContent.includes("Static[unterminated") && source.getClientRects().length > 0;
+			return output?.querySelector("h1")?.textContent === "Invalid diagram proof" && error?.textContent.includes("图表渲染失败") && source?.textContent.includes("Static[unterminated") && source.getClientRects().length > 0;
 		}, { timeout: timeoutMs }, markdownOutput(scope));
 		await assertMarkdownNoControls(scope); await screenshot(`markdown-${scope}-invalid-visible-source`);
 		evidence.markdown.push({ scope, label: "invalid Mermaid keeps heading, error and source directly visible without disclosure/retry" });
@@ -588,9 +588,9 @@ export async function verifyPluginBrowser(url, options = {}) {
 		assert.equal(documentResponse?.status(), 200, "The caller's live app must serve its home screen");
 		await openPlugins();
 		const warning = await page.$eval('[data-testid="section-plugins"]', element => element.textContent);
-		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default"]) assert.ok(warning.includes(copy), `Missing trust/default-state warning: ${copy}`);
+		for (const copy of ["受信任的本地代码", "广泛的文件与网络访问权限", "不在沙箱中运行", "重启 LearnHarness", "默认处于停用状态"]) assert.ok(warning.includes(copy), `Missing trust/default-state warning: ${copy}`);
 		assert.equal(await page.$eval(TOGGLE, element => element.getAttribute("aria-checked")), "false", "verifyPluginServer must leave the runtime fixture disabled");
-		assert.ok((await page.$eval(ROW, element => element.textContent)).includes("Disabled"), "Package row must show the disabled status");
+		assert.ok((await page.$eval(ROW, element => element.textContent)).includes("已停用"), "Package row must show the disabled status");
 		assert.equal(await page.$$eval(SIDEBAR_LINK, elements => elements.length), 0, "A disabled package must not expose a sidebar view");
 		await health();
 		evidence.assertions.push("Settings exposes the trust warning and disabled Runtime proof package");
@@ -624,10 +624,10 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.locator(`${MOUNT} button[title="Open host dialog"]`).click();
 		await page.waitForSelector('[role="dialog"][aria-label="Plugin dialog proof"]', { visible: true });
 		assert.match(await page.$eval('[role="dialog"][aria-label="Plugin dialog proof"]', node => node.textContent), /Host dialog content/);
-		await page.locator('[aria-label="Close dialog"]').click();
+		await page.locator('[aria-label="关闭对话框"]').click();
 		await page.waitForSelector('[role="dialog"][aria-label="Plugin dialog proof"]', { hidden: true });
 		await page.locator(`${MOUNT} [contenteditable="true"]`).fill("Controlled plugin message");
-		await page.locator(`${MOUNT} [aria-label="Send"]`).click();
+		await page.locator(`${MOUNT} [aria-label="发送"]`).click();
 		await page.waitForFunction(() => document.querySelector('[data-smoke-submitted]')?.textContent === "Controlled plugin message");
 		await page.locator(`${MOUNT} [contenteditable="true"]`).click();
 		await page.keyboard.down(modifier);
@@ -636,7 +636,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.waitForSelector('[data-testid="plugin-model-menu"]', { visible: true });
 		await page.keyboard.press("Escape");
 		await page.waitForSelector('[data-testid="plugin-model-menu"]', { hidden: true });
-		await page.locator('main button[aria-label="Plugin settings"]').click();
+		await page.locator('main button[aria-label="插件设置"]').click();
 		await page.waitForSelector('[data-testid="section-plugin-native-smoke"]', { visible: true });
 		await page.locator('[data-testid="section-plugin-native-smoke"] [role="switch"]').click();
 		await page.waitForSelector('[data-testid="section-plugin-native-smoke"] [role="switch"][aria-checked="true"]');
@@ -653,7 +653,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.waitForSelector('[role="dialog"][aria-label="Static Markdown dialog proof"]', { visible: true });
 		await exerciseStaticMarkdown("dialog");
 		const markdownDialogOrigin = await page.$(markdownRoot("dialog"));
-		await page.locator('[role="dialog"][aria-label="Static Markdown dialog proof"] [aria-label="Close dialog"]').click();
+		await page.locator('[role="dialog"][aria-label="Static Markdown dialog proof"] [aria-label="关闭对话框"]').click();
 		await page.waitForSelector('[role="dialog"][aria-label="Static Markdown dialog proof"]', { hidden: true });
 		assert.equal(await markdownDialogOrigin.evaluate(root => !root.isConnected && root.dataset.parentAborted === "true" && !root.querySelector("[data-plugin-ui-widget],svg")), true, "Closing a public dialog must abort and clean its Markdown widgets");
 		await markdownDialogOrigin.dispose();
@@ -727,7 +727,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		const sourceRow = `${KNOWLEDGE_OVERLAY} [data-source-drag-row="${KNOWLEDGE.sourceId}"]`;
 		assert.equal(await page.$eval(sourceRow, row => row.draggable), true, "Selecting knowledge must not remove normal source drag controls");
 		const renameSource = async name => {
-			await page.locator(`${sourceRow} button[title="Rename"]`).click();
+			await page.locator(`${sourceRow} button[title="重命名"]`).click();
 			const editor = `${sourceRow} [data-testid="source-name-input"]`;
 			await page.locator(editor).fill(name);
 			const saved = organizationResponse({ action: "rename-source", id: KNOWLEDGE.sourceId, name });
@@ -735,7 +735,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 			const directory = await saved;
 			assert.equal(directory.sources.find(source => source.id === KNOWLEDGE.sourceId)?.label, name);
 			await page.waitForSelector(editor, { hidden: true });
-			assert.equal(await page.$eval(`${sourceRow} button[title="Rename"]`, button => button.textContent), name);
+			assert.equal(await page.$eval(`${sourceRow} button[title="重命名"]`, button => button.textContent), name);
 		};
 		await renameSource("Renamed plugin picker proof");
 		await renameSource(KNOWLEDGE.sourceLabel);
@@ -804,15 +804,15 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.mouse.wheel({ deltaY: 500 });
 		await page.waitForFunction(() => document.querySelector('[data-testid="plugin-graph-actions"]').scrollTop > 0);
 		await page.$eval('[data-testid="plugin-graph-actions"]', element => { element.scrollTop = 0; });
-		await page.locator('aside button[aria-label="Close sidebar"]').click();
+		await page.locator('aside button[aria-label="关闭侧边栏"]').click();
 		await page.waitForSelector('aside[aria-hidden="true"]');
 		await page.waitForFunction(() => {
 			const rail = document.querySelector('[data-testid="plugin-graph-actions"] button')?.getBoundingClientRect();
-			const toggle = document.querySelector('button[aria-label="Open sidebar"]')?.getBoundingClientRect();
+			const toggle = document.querySelector('button[aria-label="打开侧边栏"]')?.getBoundingClientRect();
 			return rail && toggle && rail.top >= toggle.bottom + 7 && rail.left === 8;
 		});
 		await screenshot("graph-rail-sidebar-closed");
-		await page.locator('button[aria-label="Open sidebar"]').click();
+		await page.locator('button[aria-label="打开侧边栏"]').click();
 		await page.waitForSelector('aside[aria-hidden="false"]');
 		evidence.assertions.push("Graph rail scrolls over its buttons and stays below the sidebar toggle when the sidebar closes");
 		await openProof();
@@ -864,7 +864,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.waitForSelector(KNOWLEDGE_OVERLAY, { hidden: true });
 		await assertPickerOrigin("X leaves dialog draft and selected IDs untouched", dialogOrigin, [KNOWLEDGE.conclusionId], 1, false, true);
 		await screenshot("foreground-dialog-restored");
-		await page.locator(`${PICKER_DIALOG} [aria-label="Close dialog"]`).click();
+		await page.locator(`${PICKER_DIALOG} [aria-label="关闭对话框"]`).click();
 		await page.waitForFunction(selector => !document.querySelector(selector), {}, PICKER_DIALOG);
 		assert.equal(await dialogOrigin.input.evaluate(input => input.isConnected), false, "Normal dialog close must still dispose its content");
 		await dialogOrigin.input.dispose();
@@ -899,15 +899,15 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.hover('[data-testid="settings-close"]');
 		await page.waitForFunction(() => [...document.querySelectorAll('[data-slot="tooltip-content"]')].some(tooltip => {
 			const bounds = tooltip.getBoundingClientRect();
-			return tooltip.textContent === "Close (Esc)" && bounds.width > 0 && bounds.height > 0 && getComputedStyle(tooltip).visibility !== "hidden";
+			return tooltip.textContent === "关闭 (Esc)" && bounds.width > 0 && bounds.height > 0 && getComputedStyle(tooltip).visibility !== "hidden";
 		}));
 		const tooltipPaint = await page.evaluate(() => {
-			const tooltip = [...document.querySelectorAll('[data-slot="tooltip-content"]')].find(node => node.textContent === "Close (Esc)" && node.getBoundingClientRect().width > 0);
+			const tooltip = [...document.querySelectorAll('[data-slot="tooltip-content"]')].find(node => node.textContent === "关闭 (Esc)" && node.getBoundingClientRect().width > 0);
 			const bounds = tooltip.getBoundingClientRect();
 			return { text: tooltip.textContent, owned: !!tooltip.closest("[data-interaction-popup-host]"),
 				painted: tooltip.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)) };
 		});
-		assert.deepEqual(tooltipPaint, { text: "Close (Esc)", owned: true, painted: true });
+		assert.deepEqual(tooltipPaint, { text: "关闭 (Esc)", owned: true, painted: true });
 		evidence.tooltips.push(tooltipPaint);
 		await screenshot("foreground-settings-passive-tooltip");
 		await page.keyboard.press("Escape");
@@ -999,8 +999,8 @@ export async function verifyPluginBrowser(url, options = {}) {
 
 		evidence.stage = "shared lesson renderers with stored native history";
 		await openTranscript();
-		await page.waitForSelector('[aria-label="More plugin actions"]', { visible: true });
-		await page.locator('[aria-label="More plugin actions"]').click();
+		await page.waitForSelector('[aria-label="更多插件操作"]', { visible: true });
+		await page.locator('[aria-label="更多插件操作"]').click();
 		await page.waitForSelector('[data-testid="plugin-top-bar-menu"]', { visible: true });
 		await page.keyboard.press("ArrowDown");
 		await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "menuitem");
@@ -1053,7 +1053,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		};
 		const setConcurrency = async value => {
 			// Exercise the main-header gear deep-link, then the real Agent tab.
-			await page.locator('main button[aria-label="Plugin settings"]').click();
+			await page.locator('main button[aria-label="插件设置"]').click();
 			await page.waitForSelector('[data-testid="section-plugin-native-smoke"]', { visible: true });
 			await page.locator('[data-testid="settings-nav-agent"]').click();
 			await page.waitForSelector(CONCURRENCY_INPUT, { visible: true });
@@ -1297,7 +1297,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 			const sent = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat" && response.request().method() === "POST"
 				&& JSON.parse(response.request().postData() ?? "{}").input?.text === text);
 			await page.locator('[data-testid="composer"] [contenteditable="true"]').fill(text);
-			await page.locator('[data-testid="composer"] button[aria-label="Send"]').click();
+			await page.locator('[data-testid="composer"] button[aria-label="发送"]').click();
 			assert.equal((await sent).status(), 200, "Explicit composer request must start a genuine native teacher turn");
 		};
 		const assertPrivateQuestionBoundary = async () => {
@@ -1417,7 +1417,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		const expectedAnswer = draftText + "\t\n";
 		assert.equal(await editor.evaluate(node => node.value), expectedAnswer, "Unclaimed Enter edits the textarea instead of submitting");
 		const hostThinking = "Host thinking stays separate from the exact answer.";
-		await page.locator(`${questionDock} [contenteditable="true"][aria-label="Your thinking"]`).fill(hostThinking);
+		await page.locator(`${questionDock} [contenteditable="true"][aria-label="你的思考"]`).fill(hostThinking);
 		await editor.focus();
 		assert.deepEqual((await admissionCall("question-status")).counts, { requests: 1, poses: 1, reviews: 0, completed: 1 }, "Successful mixed pose must stop the native engine until the learner answers");
 		const answerResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/chat" && response.request().method() === "POST"
@@ -1477,7 +1477,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.waitForSelector(`${questionEditor}:not(:disabled)`, { visible: true });
 		await page.waitForFunction(() => document.querySelector('[data-testid="dictation-toggle"]')?.disabled === true);
 		assert.equal(await page.$eval('[data-testid="dictation-toggle"]', node => node.getClientRects().length > 0), true, "Thinking-off editor without explicit appendTranscript keeps the host microphone visible but disabled");
-		assert.equal(await page.$$eval(`${questionDock} [aria-label="Your thinking"]`, nodes => nodes.length), 0, "showThinking:false never invents a host thinking field");
+		assert.equal(await page.$$eval(`${questionDock} [aria-label="你的思考"]`, nodes => nodes.length), 0, "showThinking:false never invents a host thinking field");
 		assert.equal(await page.$eval('[data-testid="reading-thinking-field"] [contenteditable="true"]', node => node.textContent), readingText, "Reveal retains the distinct host reading channel");
 		await page.locator(questionEditor).fill("unsubmitted check draft");
 		disabledQuestionEditor = await page.$(questionEditor);
@@ -1540,7 +1540,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		assert.equal(await page.$$eval('[data-testid="settings-dialog"]', nodes => nodes.length), 1, "Unloading the covered plugin dialog must not destroy global Settings");
 		evidence.markdown.push({ label: "Disable tears down simultaneously mounted formatted view/dialog Markdown without orphan widgets, Mermaid SVG, or loss of global Settings" });
 		await closeSettings();
-		await page.waitForFunction(() => document.querySelector("main")?.textContent.includes("This plugin is disabled."));
+		await page.waitForFunction(() => document.querySelector("main")?.textContent.includes("此插件已停用。"));
 		await health();
 		// These intentional negative HTTP probes run outside the page, so their
 		// expected 409s cannot mask or be confused with actual plugin console /
@@ -1572,7 +1572,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		const revealFallback = await page.$('[data-testid="teach-check-reveal"]');
 		if (revealFallback && await revealFallback.evaluate(node => node.getClientRects().length > 0)) await revealFallback.click();
 		await revealFallback?.dispose();
-		await page.waitForFunction(selector => document.querySelector(selector)?.textContent.includes("Question unavailable"), {}, questionDock);
+		await page.waitForFunction(selector => document.querySelector(selector)?.textContent.includes("问题不可用"), {}, questionDock);
 		assert.equal(await page.$$eval(questionEditor, nodes => nodes.length), 0, "Disabling a pending type removes its editor without inventing an answer");
 		const fallbackText = await page.$eval(questionDock, node => node.textContent);
 		assert.ok(fallbackText.includes(check.input.question), "Unavailable renderer uses saved readable common question");
@@ -1586,7 +1586,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		const nativePostsBeforeDismiss = evidence.requests.filter(request => new URL(request.url).pathname === "/api/chat" && request.method === "POST").length;
 		await screenshot("question-disabled-fallback");
 		const dismissed = page.waitForResponse(response => new URL(response.url()).pathname === questionRoute + "/dismiss" && response.request().method() === "POST");
-		await page.$$eval(`${questionDock} button`, buttons => buttons.find(button => button.textContent.trim() === "Dismiss question").click());
+		await page.$$eval(`${questionDock} button`, buttons => buttons.find(button => button.textContent.trim() === "跳过问题").click());
 		assert.equal((await dismissed).status(), 200, "Unavailable question dismissal must use the host identity-bound cancellation route");
 		await page.waitForSelector(questionDock, { hidden: true });
 		await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 350)));
@@ -1674,7 +1674,7 @@ export async function observeSilentSubmissionPresentation(page) {
 			if (!(node instanceof Element)) return;
 			if (/Preparing submission/.test(node.textContent ?? "")) violations.push("preparation label");
 			if (node.parentElement === shell && node.matches('[role="status"]')) violations.push("preparation progress row");
-			if (node.matches('[role="status"]') && [...node.querySelectorAll("button")].some(button => button.textContent.trim() === "Cancel")) violations.push("preparation Cancel");
+			if (node.matches('[role="status"]') && [...node.querySelectorAll("button")].some(button => button.textContent.trim() === "取消")) violations.push("preparation Cancel");
 		};
 		const record = records => {
 			for (const change of records) {
@@ -1709,7 +1709,7 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	const surface = '[data-smoke-session-surface="0"]';
 	const nativeSurface = '[data-plugin-session-surface]';
 	const composer = '[data-testid="composer"]';
-	const send = `${composer} button[aria-label="Send"]`;
+	const send = `${composer} button[aria-label="发送"]`;
 	const action = name => page.locator(`${surface} [data-smoke-session-action="${name}"]`).click();
 	const read = async id => page.evaluate(async id => {
 		const response = await fetch(`/api/chats/${id}`);
@@ -1732,7 +1732,7 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 		await page.waitForFunction(id => location.pathname === `/chat/${id}`, {}, id);
 	};
 	const openSurface = async () => {
-		await page.locator('[aria-label="More plugin actions"]').click();
+		await page.locator('[aria-label="更多插件操作"]').click();
 		await page.waitForSelector('[data-testid="plugin-top-bar-menu"]', { visible: true });
 		// Reuse the existing action and placements/counts. Session context alone
 		// changes its behavior: the host supplies the opaque surfaceTarget.
@@ -1761,7 +1761,7 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 			const response = await fetch(`/api/chats/${id}`); const record = await response.json();
 			return !record.turnInFlight;
 		}, {}, id);
-		await page.waitForSelector('main button[aria-label="Stop"]', { hidden: true });
+		await page.waitForSelector('main button[aria-label="停止"]', { hidden: true });
 	};
 	const post = (type, text) => {
 		const pending = page.waitForResponse(response => {
@@ -1818,7 +1818,7 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 			semanticDisplay: getComputedStyle(node.querySelector('[data-plugin-session-surface]')).display,
 			semanticBounds: box(node.querySelector('[data-plugin-session-surface]')),
 			topbar: box(document.querySelector("main header")), sidebar: box(document.querySelector("aside")),
-			visibleTitle: node.querySelector("h2")?.textContent, closeVisible: !!node.querySelector('button[aria-label="Close"]'),
+			visibleTitle: node.querySelector("h2")?.textContent, closeVisible: !!node.querySelector('button[aria-label="关闭"]'),
 			composerCovered: !!document.querySelector('[data-testid="composer"]')?.closest("[inert]") };
 	});
 	evidence.sessionExtensions.push({ label: "surface body geometry", ...regionBounds });
@@ -1842,7 +1842,7 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	await page.locator(`${surface} [data-smoke-session-action="close"]`).click();
 	await page.waitForSelector(surface, { hidden: true }); await parent.dispose();
 	// Visible native X independently exercises host close, not fixture disposal.
-	await openSurface(); await page.locator(`${nativeSurface} button[aria-label="Close"]`).click();
+	await openSurface(); await page.locator(`${nativeSurface} button[aria-label="关闭"]`).click();
 	await page.waitForSelector(surface, { hidden: true });
 	const failedArm = await arm(true);
 	await page.waitForFunction(selector => !document.querySelector(selector)?.disabled, {}, send);
@@ -1882,11 +1882,11 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	assert.equal(hooks(state).length, 2); assert.equal(accepted(state)[0].pending, false);
 	assertProviderImages(state.requests.at(-1), [failedArm.answer], "Image-only native user submission");
 	await release(SESSION.chatId);
-	await page.waitForSelector('main img[alt="Submitted image"]', { visible: true });
+	await page.waitForSelector('main img[alt="已提交的图片"]', { visible: true });
 	const nativeUser = (await read(SESSION.chatId)).messages.find(message => message.role === "user" && Array.isArray(message.content) && message.content.some(block => block.type === "image"));
 	assert.ok(nativeUser); assert.deepEqual(nativeUser.content.filter(block => block.type === "image"), [failedArm.answer]);
 	await sendText(SESSION.chatId, SESSION.pathText);
-	assert.equal(await page.$$eval('main img[alt="Submitted image"]', nodes => nodes.length), 1, ".png attached-looking path must remain text/path, not inferred image");
+	assert.equal(await page.$$eval('main img[alt="已提交的图片"]', nodes => nodes.length), 1, ".png attached-looking path must remain text/path, not inferred image");
 	const pathRecord = await read(SESSION.chatId);
 	assert.ok(pathRecord.messages.some(message => message.role === "user" && JSON.stringify(message.content).includes(SESSION.pathText)), "Path stays native text authority");
 	evidence.sessionExtensions.push({ label: "body bounds, title/X, mounted stack, Settings/one Escape, fail-closed retained native draft then fresh image-only Submit", regionBounds, deliveredInput, events: state.events });
@@ -1900,7 +1900,7 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	await page.waitForSelector('[data-smoke-question-editor]:not(:disabled)', { visible: true });
 	const original = '  function canvasAnswer() {\n\treturn "<svg> & PNG";\n}  \n';
 	await page.locator('[data-smoke-question-editor]').fill(original);
-	await page.locator('[data-testid="plugin-question-dock"] [aria-label="Your thinking"]').fill("Separate answer thinking.");
+	await page.locator('[data-testid="plugin-question-dock"] [aria-label="你的思考"]').fill("Separate answer thinking.");
 	const answerArm = await arm(false);
 	const countBefore = hooks(await status()).length;
 	const answered = post("plugin-question-answer");
@@ -1919,11 +1919,11 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	const modelContent = JSON.stringify(state.requests.at(-1).messages);
 	assert.ok(modelContent.includes("reading") && modelContent.includes("thinking"), "Provider projection labels separate thinking channels");
 	await release(SESSION.chatId);
-	await page.waitForFunction(() => [...document.querySelectorAll('main img[alt="Submitted image"]')].length === 4);
-	const channelPlacement = await page.$$eval('main img[alt="Submitted image"]', images => images.map(image => ({ src: image.src,
+	await page.waitForFunction(() => [...document.querySelectorAll('main img[alt="已提交的图片"]')].length === 4);
+	const channelPlacement = await page.$$eval('main img[alt="已提交的图片"]', images => images.map(image => ({ src: image.src,
 		thinkingLabel: (() => { let node = image.parentElement; while (node && node.tagName !== "MAIN") { const button = node.querySelector(':scope > button[aria-expanded]'); if (button) return button.textContent.trim(); node = node.parentElement; } return null; })() })));
 	assert.ok(channelPlacement.some(entry => entry.thinkingLabel?.includes("THINKING WHILE READING")), "Reading image has separate visible host container");
-	assert.ok(channelPlacement.some(entry => entry.thinkingLabel?.includes("YOUR THINKING")), "Question-thinking image has visible host thinking container");
+	assert.ok(channelPlacement.some(entry => entry.thinkingLabel?.includes("你的思考")), "Question-thinking image has visible host thinking container");
 	assert.equal(await page.$eval('[data-smoke-question-answered]', node => node.textContent), original + SESSION.codeSuffix, "Ordinary external renderer preserves transformed code verbatim while host owns images outside it");
 	evidence.sessionExtensions.push({ label: "genuine plugin JSON-string answer transform, code verbatim, three native image channels and actual adapter payload", answerInput, answerResult, channelPlacement, provider: state.requests.at(-1) });
 	await screenshot("session-native-answer-images");
@@ -1983,8 +1983,8 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	assert.ok(marker, "Image-only thinking must persist as a genuine native marker");
 	assert.deepEqual(marker.details.images, [thinkingArm.answer]);
 	await release(SESSION.practiceId);
-	await page.waitForSelector('main img[alt="Submitted image"]', { visible: true });
-	assert.equal(await page.$$eval('main img[alt="Submitted image"]', images => images.length), 1);
+	await page.waitForSelector('main img[alt="已提交的图片"]', { visible: true });
+	assert.equal(await page.$$eval('main img[alt="已提交的图片"]', images => images.length), 1);
 	evidence.sessionExtensions.push({ label: "real native problem → empty thinking enabled by pending refresh → native marker image → decoded provider image_url bytes", thinkingInput, marker, provider: state.requests.at(-1) });
 	await screenshot("session-practice-image-only-thinking");
 	await openProof();

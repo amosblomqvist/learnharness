@@ -85,6 +85,6 @@ describe("turn settlement recovery", () => {
 			saveMessages() { throw new Error("synthetic disk failure"); },
 		} as unknown as ChatStore;
 		const message = { role: "assistant", content: [{ type: "text", text: "Synthetic reply" }], stopReason: "stop", timestamp: 1 } as AgentMessage;
-		assert.throws(() => persistTurn(store, "fixture", 0, [message], false), /The reply could not be saved\./);
+		assert.throws(() => persistTurn(store, "fixture", 0, [message], false), /无法保存回复。/);
 	});
 });

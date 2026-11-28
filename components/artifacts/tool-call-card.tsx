@@ -2,6 +2,7 @@
 
 import { ChevronRight } from "lucide-react";
 import type { ArtifactPartProps } from "@/src/core";
+import { tr } from "@/src/core";
 
 /**
  * The generic tool-call card (sources v1, 2026-09-19): a quiet, collapsed
@@ -52,7 +53,7 @@ function outputText(output: unknown): string | null {
 		const o = output as { text?: unknown; images?: unknown[] };
 		const text = typeof o.text === "string" ? o.text : null;
 		const n = Array.isArray(o.images) ? o.images.length : 0;
-		return n > 0 ? `${text ?? ""}\n[${n} image${n > 1 ? "s" : ""} attached to the model]`.trim() : text;
+		return n > 0 ? tr(`${text ?? ""}\n[已向模型附加 ${n} 张图片]`, `${text ?? ""}\n[${n} image${n > 1 ? "s" : ""} attached to the model]`).trim() : text;
 	}
 	try {
 		return JSON.stringify(output, null, 2);
@@ -84,7 +85,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 				{p.input != null && (
 					<div>
 						<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">
-							Input
+							{tr("输入", "Input")}
 						</div>
 						<pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
 							{JSON.stringify(p.input, null, 2)}
@@ -94,7 +95,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 				{typeof p.errorText === "string" ? (
 					<div>
 						<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">
-							Error
+							{tr("错误", "Error")}
 						</div>
 						<pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-error">
 							{p.errorText}
@@ -103,7 +104,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 				) : out != null ? (
 					<div>
 						<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">
-							Output
+							{tr("输出", "Output")}
 						</div>
 						<pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
 							{out}
@@ -111,7 +112,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 					</div>
 				) : (
 					p.state !== "output-available" && (
-						<div className="text-muted-foreground italic">running…</div>
+						<div className="text-muted-foreground italic">{tr("运行中…", "running…")}</div>
 					)
 				)}
 			</div>

@@ -1,61 +1,61 @@
-# Custom and local models
+# 自定义模型与本地模型
 
-LearnHarness supports **one custom OpenAI-compatible endpoint with multiple models**, including a local model server. The setup/UI builds on PR #62 by Daniel Buckner and Abhishek Thakur. Pi handles inference, message conversion, tools, streaming, and reasoning effort. [Claude Code](claude-code.md) is a separate provider.
+LearnHarness 支持**一个自定义的 OpenAI 兼容端点，并可包含多个模型**，其中包括本地模型服务器。这套设置/界面基于 Daniel Buckner 和 Abhishek Thakur 的 PR #62。Pi 负责推理、消息转换、工具、流式输出和推理强度。[Claude Code](claude-code.md) 是一个单独的服务商。
 
-## Connect
+## 连接
 
-1. Open **Settings → Providers → + Add a provider → Custom endpoint**, or use the first-run provider picker.
-2. Enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. HTTP/HTTPS and private-network addresses are supported; embedded credentials, query strings, fragments, and discovery redirects are rejected.
-3. Choose **Keyless** or **API key**. Keyless ignores saved/environment custom keys. API key uses `CUSTOM_OPENAI_API_KEY`; a real environment value overrides a saved value, and the editor identifies environment ownership.
-4. Optionally enter model IDs, separated by commas or whitespace, for servers without working model discovery.
-5. Click **Connect**, then select Strong, Cheap, and Vision models.
+1. 打开 **设置 → 服务商 → + 添加服务商 → 自定义端点**（Settings → Providers → + Add a provider → Custom endpoint），或使用首次运行时的服务商选择器。
+2. 输入完整的 API 基础 URL，例如 `http://localhost:11434/v1`。LearnHarness **不会自动追加 `/v1`**。支持 HTTP/HTTPS 和私有网络地址；内嵌凭据、查询字符串、片段标识以及发现过程中的重定向都会被拒绝。
+3. 选择 **无密钥**（Keyless）或 **API 密钥**（API key）。“无密钥”会忽略已保存的/环境变量中的自定义密钥。“API 密钥”使用 `CUSTOM_OPENAI_API_KEY`；真实存在的环境变量值会覆盖已保存的值，编辑器会标明该密钥由环境变量提供。
+4. 对于模型发现功能无法正常工作的服务器，可以选择输入模型 ID，用逗号或空白字符分隔。
+5. 点击 **连接**（Connect），然后选择强力（Strong）、经济（Cheap）和视觉（Vision）模型。
 
-A key is bound to the canonical endpoint URL and authentication mode. Changing the URL requires a new effective key or explicit consent to reuse it; it is never silently forwarded. Clearing authentication selects Keyless. Use this editor—not generic key management—to change custom credentials.
+密钥与规范化后的端点 URL 及认证模式绑定。更改 URL 需要提供一个新的有效密钥，或明确同意复用原密钥；密钥绝不会被悄悄转发。清除认证信息会选中“无密钥”。要更改自定义凭据，请使用这个编辑器，而不是通用的密钥管理。
 
-Connect requests `GET <base>/models`; reported metadata wins over duplicate entered IDs. A nonfatal discovery failure can fall back to entered IDs. At the same URL, fallback preserves the previous model snapshot/pins; a different URL starts its own snapshot. **401/403, redirects, response-size, and model-count violations fail even with entered IDs.** A failed connect without fallback leaves configuration unchanged.
+连接时会请求 `GET <base>/models`；对于与手动输入重复的 ID，以服务器报告的元数据为准。非致命的发现失败可以回退到手动输入的 ID。在同一个 URL 下，回退会保留之前的模型快照/固定值；不同的 URL 会开始自己的快照。**401/403、重定向、响应大小以及模型数量超限，即使输入了 ID 也会失败。** 没有回退的连接失败不会改变现有配置。
 
-Discovery is not a continuous health or capability check. LearnHarness does not install a backend, download models, or perform custom-endpoint OAuth.
+发现并不是持续的健康检查或能力检查。LearnHarness 不会安装后端、下载模型，也不会为自定义端点执行 OAuth。
 
-## Budgets and reasoning
+## 预算与推理
 
-Edit each model's pins offline:
+可以离线编辑每个模型的固定值：
 
-| Setting | Resolution |
+| 设置项 | 取值顺序 |
 | --- | --- |
-| Context budget | User pin → reported limit → **8192 fallback** |
-| Maximum output | User pin → reported limit → **4096 fallback** |
-| Reasoning support | User declaration → reported support |
+| 上下文预算 | 用户固定值 → 报告的限制 → **8192 回退值** |
+| 最大输出 | 用户固定值 → 报告的限制 → **4096 回退值** |
+| 推理支持 | 用户声明 → 报告的支持情况 |
 
-Positive integer token pins are accepted, including small output limits; blank removes a pin. The editor labels reported, fallback, and pinned values. **These are request/compaction budgets, not commands to resize the backend's context.** Configure the server separately and match its active limits. Reconnecting prunes pins only to the resulting model IDs.
+接受正整数的 token 固定值，包括较小的输出限制；留空则移除固定值。编辑器会标注哪些值是报告的、回退的和固定的。**这些是请求/上下文压缩的预算，而不是调整后端上下文大小的指令。** 请单独配置服务器，并使其与当前生效的限制相匹配。重新连接时，只会把固定值裁剪到连接后得到的模型 ID 范围内。
 
-Reasoning support declares a capability; it does not enable execution. The normal Pi effort picker remains available, but **Off may not disable a backend's default thinking**. There is no model-name inference, Ollama preset, thinking-map/compatibility editor, or nonstandard-header editor.
+推理支持只是声明一种能力，并不会启用实际执行。常规的 Pi 推理强度选择器仍然可用，但 **“关闭”（Off）不一定能禁用后端默认的思考**。没有基于模型名称的推断、没有 Ollama 预设、没有思考映射/兼容性编辑器，也没有非标准请求头编辑器。
 
-## Images
+## 图片
 
-All custom models are Vision-selectable; reported image-capable models appear first. Choose a backend that actually understands images.
+所有自定义模型都可被选为视觉模型；报告支持图片的模型会排在前面。请选择真正能理解图片的后端。
 
-Every custom-engine image-bearing request attempts delivery even when discovery omitted image support. This includes file reads, PDF pages, and visual previews. A request-local model allowance lets Pi encode images without changing the catalog's capability claims. Text-only servers may reject them; errors surface without silent text-only fallback. Payload delivery tests do not establish real-model image quality.
+每个携带图片的自定义引擎请求都会尝试发送图片，即使发现结果中没有包含图片支持。这包括文件读取、PDF 页面和图示预览。一个仅限当次请求的模型许可让 Pi 可以编码图片，而不会改变模型目录中声明的能力。纯文本服务器可能会拒绝这些请求；错误会如实显示，而不会悄悄回退为纯文本。载荷发送测试并不能证明真实模型的图片理解质量。
 
-## Editing, credentials, and recovery
+## 编辑、凭据与恢复
 
-Nonsecret configuration lives in `settings.json.customProvider`; saved keys and an internal binding live in `auth.json`. Authorization requires matching binding IDs, URL, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed/unreadable storage fails closed without overwrite.
+非机密配置保存在 `settings.json.customProvider` 中；已保存的密钥和一个内部绑定保存在 `auth.json` 中。授权需要绑定 ID、URL 和模式全部匹配。如果在写入 auth 和 settings 之间发生崩溃，服务商会处于禁用状态，而不会把密钥发送到不匹配的端点。“无密钥”同样需要有效的非机密绑定，但从不解析密钥。缺失的私有存储可以初始化；格式错误/无法读取的存储会以安全方式失败（fail closed），且不会被覆盖。
 
-If authorization is interrupted, reload and explicitly reconnect. An environment key changing endpoints does not authorize a shadowed saved key for that new URL. Disconnect prevents a latent environment key from reviving the provider. These are crash/restart guards, not a power-loss/fsync transaction guarantee.
+如果授权过程被中断，请重新加载并明确地重新连接。环境变量密钥更换端点时，不会让被其遮蔽的已保存密钥获得对新 URL 的授权。断开连接可以防止潜在的环境变量密钥让该服务商重新生效。这些是针对崩溃/重启的防护，而不是针对断电/fsync 的事务性保证。
 
-Stale editor saves return **409**: reload and retry. Mutations preserve unrelated settings changes; failed edits do not claim success. Each new model operation resolves current endpoint, credentials, limits, and effort; in-flight requests keep their setup. Disconnecting/removing a model does not remap saved selections or rewrite history.
+编辑器的过期保存会返回 **409**：请重新加载后重试。修改会保留无关的设置变更；失败的编辑不会声称成功。每次新的模型操作都会解析当前的端点、凭据、限制和推理强度；进行中的请求保留其原有设置。断开连接/移除模型不会重新映射已保存的选择，也不会改写历史。
 
-Discovery limits are **15 seconds**, **8 MiB**, and **10,000 models**; configuration bodies are bounded to **64 KiB**. Desktop capability/same-origin browser checks are not multi-user authentication.
+发现的限制为 **15 秒**、**8 MiB** 和 **10,000 个模型**；配置请求体的上限为 **64 KiB**。桌面端的能力检查/同源浏览器检查并不是多用户认证。
 
-## Pricing and older development configurations
+## 定价与旧版开发配置
 
-Prices are **unknown/unpriced**, not $0—even for a local server. Internal zero rates are Pi-required placeholders; there is no rate editor. See [accounting](compaction-accounting.md).
+价格为**未知/未定价**，而不是 $0—即使是本地服务器也是如此。内部的零费率是 Pi 所要求的占位符；没有费率编辑器。参阅[计费说明](compaction-accounting.md)。
 
-The earlier unshipped `models.json` configuration is not read or migrated. Existing early development profiles need explicit endpoint configuration/reconnect and model reselection; files/history are not deleted or silently remapped.
+早期未发布的 `models.json` 配置不会被读取或迁移。现有的早期开发配置需要显式配置端点/重新连接并重新选择模型；文件/历史不会被删除，也不会被悄悄重新映射。
 
-## Maintainer entry points
+## 维护者入口
 
-- [`server/custom-provider.ts`](../src/server/custom-provider.ts): discovery/registration; [`custom-provider-http.ts`](../src/server/custom-provider-http.ts): HTTP revisions and mutation boundaries.
-- [`custom-provider-auth.ts`](../src/server/custom-provider-auth.ts) and the [binding contract](../src/core/custom-provider-auth.ts): credential authorization and restart behavior.
-- [`agent/models.ts`](../src/agent/models.ts): per-operation engine resolution and image allowance.
+- [`server/custom-provider.ts`](../src/server/custom-provider.ts)：发现/注册；[`custom-provider-http.ts`](../src/server/custom-provider-http.ts)：HTTP 版本修订和修改边界。
+- [`custom-provider-auth.ts`](../src/server/custom-provider-auth.ts) 和[绑定契约](../src/core/custom-provider-auth.ts)：凭据授权与重启行为。
+- [`agent/models.ts`](../src/agent/models.ts)：按操作进行的引擎解析和图片许可。
 
-`tests/custom-provider-*.test.*` covers fake endpoints, binding/restart failures, concurrent editing, UI, and payload delivery—not backend installation or real-model capabilities.
+`tests/custom-provider-*.test.*` 覆盖模拟端点、绑定/重启失败、并发编辑、界面和载荷发送—不覆盖后端安装或真实模型的能力。

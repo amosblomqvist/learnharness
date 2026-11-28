@@ -33,6 +33,13 @@ describe("parseGeneralSettingsBody", () => {
 		assert.equal(parseGeneralSettingsBody("x").ok, false);
 		assert.equal(parseGeneralSettingsBody({ autoUpdate: "yes" }).ok, false);
 	});
+
+	it("accepts language zh/en and rejects others", () => {
+		const en = parseGeneralSettingsBody({ autoUpdate: true, language: "en" });
+		assert.ok(en.ok);
+		assert.deepEqual(en.settings, { autoUpdate: true, language: "en" });
+		assert.equal(parseGeneralSettingsBody({ language: "fr" }).ok, false);
+	});
 });
 
 describe("parseAgentSettingsBody", () => {
@@ -45,7 +52,7 @@ describe("parseAgentSettingsBody", () => {
 		for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, -Infinity, "8", "", null, true, [], {}]) {
 			const result = parseAgentSettingsBody({ workerRequestConcurrency: value });
 			assert.equal(result.ok, false, String(value));
-			if (!result.ok) assert.match(result.error, /workerRequestConcurrency.*positive.*safely representable whole number/);
+			if (!result.ok) assert.match(result.error, /workerRequestConcurrency 必须是可安全表示的正整数/);
 		}
 		assert.deepEqual(parseAgentSettingsBody({ workerRequestConcurrency: undefined }), { ok: true, settings: {} });
 	});
@@ -64,7 +71,7 @@ describe("parseAgentSettingsBody", () => {
 		});
 		const bad = parseAgentSettingsBody({ models: { teacher: {} } });
 		assert.equal(bad.ok, false);
-		if (!bad.ok) assert.match(bad.error, /unknown role "teacher" \(supported: researcher, demoBuilder, visualMaker, extractor, auditor, sideQuestion\)/);
+		if (!bad.ok) assert.match(bad.error, /未知角色“teacher”（支持：researcher, demoBuilder, visualMaker, extractor, auditor, sideQuestion）/);
 		const malformed = parseAgentSettingsBody({ models: { researcher: { model: { provider: 1, id: "x" } } } });
 		assert.equal(malformed.ok, false);
 	});
@@ -175,10 +182,10 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.deepEqual(ok.ok && ok.settings, { theme: "rose-pine-dawn", colors: { warning: "#f0f0f0", error: null } });
 		const badTheme = parseAppearanceSettingsBody({ theme: "Rosé Pine" });
 		assert.equal(badTheme.ok, false);
-		assert.match(!badTheme.ok ? badTheme.error : "", /theme must be a theme id/);
+		assert.match(!badTheme.ok ? badTheme.error : "", /theme 必须是主题 ID/);
 		const unknownColor = parseAppearanceSettingsBody({ colors: { sepia: "#000000" } });
 		assert.equal(unknownColor.ok, false);
-		assert.match(!unknownColor.ok ? unknownColor.error : "", /unknown color "sepia"/);
+		assert.match(!unknownColor.ok ? unknownColor.error : "", /未知颜色“sepia”/);
 		assert.equal(parseAppearanceSettingsBody({ colors: { error: "red" } }).ok, false);
 		assert.equal(parseAppearanceSettingsBody({ colors: "red" }).ok, false);
 	});
@@ -234,7 +241,7 @@ describe("parseGraphSettingsBody", () => {
 		// below the cost floor: 400 with the floor named (penny-batches)
 		const tiny = parseGraphSettingsBody({ extractionChunkTokens: 100 });
 		assert.equal(tiny.ok, false, "below-floor rejected");
-		assert.match(tiny.ok === false ? tiny.error : "", /at least 500/);
+		assert.match(tiny.ok === false ? tiny.error : "", /不能小于 500/);
 		// junk shapes: 400
 		assert.equal(parseGraphSettingsBody({ extractionChunkTokens: "4096" }).ok, false);
 		assert.equal(parseGraphSettingsBody({ extractionChunkTokens: NaN }).ok, false);
@@ -256,7 +263,7 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 		for (const includeReasoning of ["true", "false", 0, 1, null, [], {}]) {
 			const result = parseCompactionSettingsBody({ includeReasoning });
 			assert.ok(!result.ok);
-			assert.match(result.error, /includeReasoning must be true or false/);
+			assert.match(result.error, /includeReasoning 必须是 true 或 false/);
 		}
 	});
 	it("parses a threshold; absent = the empty section (factory default at resolution)", () => {
@@ -275,13 +282,13 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 	it("rejects below the 32k floor with the anti-churn rationale", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: 20_000 });
 		assert.ok(!r.ok);
-		assert.match(r.error ?? "", /at least 32000/);
-		assert.match(r.error ?? "", /churn/);
+		assert.match(r.error ?? "", /不能小于 32000/);
+		assert.match(r.error ?? "", /反复压缩/);
 	});
 	it("rejects non-numbers", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: "big" });
 		assert.ok(!r.ok);
-		assert.match(r.error ?? "", /must be a number/);
+		assert.match(r.error ?? "", /必须是数字/);
 	});
 });
 
@@ -315,7 +322,7 @@ describe("parseModelsSettingsBody (model slots wave, 2026-09-20)", () => {
 		const levelOnly = parseModelsSettingsBody({ cheap: { thinkingLevel: "high" } });
 		assert.equal(levelOnly.ok, false);
 		if (!levelOnly.ok) {
-			assert.match(levelOnly.error, /slot "cheap" must set a model/);
+			assert.match(levelOnly.error, /槽位“cheap”必须设置模型/);
 		}
 	});
 
@@ -328,13 +335,13 @@ describe("parseModelsSettingsBody (model slots wave, 2026-09-20)", () => {
 	it("unknown slots are 400s with the supported list", () => {
 		const bad = parseModelsSettingsBody({ mega: { thinkingLevel: "high" } });
 		assert.equal(bad.ok, false);
-		if (!bad.ok) assert.match(bad.error, /unknown slot "mega" \(supported: strong, cheap, vision\)/);
+		if (!bad.ok) assert.match(bad.error, /未知槽位“mega”（支持：strong, cheap, vision）/);
 	});
 
 	it("a present-but-empty slot object is rejected (absent slot = unset)", () => {
 		const bad = parseModelsSettingsBody({ strong: {} });
 		assert.equal(bad.ok, false);
-		if (!bad.ok) assert.match(bad.error, /slot "strong" must set a model/);
+		if (!bad.ok) assert.match(bad.error, /槽位“strong”必须设置模型/);
 	});
 
 	it("malformed slot shapes are 400s", () => {

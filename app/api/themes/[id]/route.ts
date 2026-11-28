@@ -7,14 +7,15 @@
 
 import { isBuiltinThemeId } from "@/src/core";
 import { readSettingsRecord, themeStore, writeSettingsRecord } from "@/src/server";
+import { tr } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
 export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {
 	const { id } = await ctx.params;
-	if (isBuiltinThemeId(id)) return Response.json({ error: `"${id}" is a built-in theme` }, { status: 400 });
+	if (isBuiltinThemeId(id)) return Response.json({ error: tr(`“${id}”是内置主题`, `"${id}" is a built-in theme`) }, { status: 400 });
 	const theme = themeStore.readTheme(id);
-	if (!theme) return Response.json({ error: `unknown theme "${id}"` }, { status: 404 });
+	if (!theme) return Response.json({ error: tr(`未知的主题“${id}”`, `unknown theme "${id}"`) }, { status: 404 });
 	themeStore.deleteTheme(id);
 	const record = readSettingsRecord();
 	if (record?.appearance?.theme === id) {

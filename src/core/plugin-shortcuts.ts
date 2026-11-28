@@ -1,3 +1,4 @@
+import { tr } from "./i18n.ts";
 /** Declarative action shortcuts and deterministic, browser-safe resolution. */
 export interface PluginShortcutViewScope {
 	readonly sessions?: readonly ("teaching" | "practice")[];
@@ -70,14 +71,14 @@ export function resolvePluginShortcuts(candidates: readonly PluginShortcutCandid
 		const binding = user ? overrides[candidate.id] : candidate.shortcut.defaultBinding ?? "";
 		const base = { ...candidate, binding: typeof binding === "string" ? binding : "", source: user ? "user" as const : "default" as const };
 		if (binding === "") return { ...base, status: "unbound" };
-		if (!isPluginShortcutBinding(binding)) return { ...base, status: "invalid", reason: "Not an allowed plugin action shortcut" };
-		if (core.has(binding)) return { ...base, status: "conflict", reason: `Conflicts with core shortcut: ${core.get(binding)}` };
+		if (!isPluginShortcutBinding(binding)) return { ...base, status: "invalid", reason: tr("不是允许的插件操作快捷键", "Not an allowed plugin action shortcut") };
+		if (core.has(binding)) return { ...base, status: "conflict", reason: tr(`与核心快捷键冲突：${core.get(binding)}`, `Conflicts with core shortcut: ${core.get(binding)}`) };
 		return { ...base, status: "active" };
 	});
 	for (const row of rows) {
 		if (!row.binding || !isPluginShortcutBinding(row.binding) || core.has(row.binding)) continue;
 		const other = rows.find(other => other !== row && other.binding === row.binding && pluginShortcutScopesOverlap(row, other) && (row.source === "default" || other.source === "user"));
-		if (other) { row.status = "conflict"; row.reason = `Conflicts with ${other.pluginName} · ${other.name}`; }
+		if (other) { row.status = "conflict"; row.reason = tr(`与 ${other.pluginName} · ${other.name} 冲突`, `Conflicts with ${other.pluginName} · ${other.name}`); }
 	}
 	return rows;
 }

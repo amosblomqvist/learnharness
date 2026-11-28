@@ -21,6 +21,7 @@ import {
 	type CustomModel,
 	type CustomModelOverride,
 } from "../core/settings.ts";
+import { tr } from "../core/i18n.ts";
 
 
 /** Placeholder bearer for keyless endpoints (the OpenAI client needs *a* key). */
@@ -102,7 +103,7 @@ export function buildOpenAiCompatibleProvider(input: {
 		name: CUSTOM_PROVIDER.label,
 		baseUrl: input.baseUrl,
 		auth: { apiKey: {
-			name: `${CUSTOM_PROVIDER.label} API key`,
+			name: tr(`${CUSTOM_PROVIDER.label} API 密钥`, `${CUSTOM_PROVIDER.label} API key`),
 			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? CUSTOM_PROVIDER.envVar : "keyless" }),
 		} },
 		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides)),
@@ -128,7 +129,7 @@ export type DiscoverResult =
  *  body → honest error, never a silent empty list. */
 export async function discoverModels(baseUrl: string, apiKey?: string): Promise<DiscoverResult> {
 	const base = normalizeBaseUrl(baseUrl);
-	if (!base) return { ok: false, error: "Base URL must be a valid http(s) URL" };
+	if (!base) return { ok: false, error: tr("Base URL 必须是有效的 http(s) 地址", "Base URL must be a valid http(s) URL") };
 	const key = apiKey?.trim();
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 15_000);
@@ -140,15 +141,15 @@ export async function discoverModels(baseUrl: string, apiKey?: string): Promise<
 		});
 		if (res.status >= 300 && res.status < 400) {
 			await res.body?.cancel();
-			return { ok: false, error: "Discovery redirects are not allowed", fatal: true };
+			return { ok: false, error: tr("模型发现请求不允许重定向", "Discovery redirects are not allowed"), fatal: true };
 		}
-		if (!res.ok) { await res.body?.cancel(); return { ok: false, error: `Endpoint returned HTTP ${res.status}`, status: res.status }; }
+		if (!res.ok) { await res.body?.cancel(); return { ok: false, error: tr(`端点返回 HTTP ${res.status}`, `Endpoint returned HTTP ${res.status}`), status: res.status }; }
 		const body = await readBoundedJson(res, 8 * 1024 * 1024);
 		const list = extractModels(body);
-		if (list === null) return { ok: false, error: "Endpoint response was not a model list" };
+		if (list === null) return { ok: false, error: tr("端点响应不是模型列表", "Endpoint response was not a model list") };
 		return { ok: true, models: list };
 	} catch (err) {
-		return { ok: false, error: err instanceof CustomBodyLimitError ? err.message : controller.signal.aborted ? "Endpoint timed out" : "Discovery request failed", fatal: err instanceof CustomBodyLimitError };
+		return { ok: false, error: err instanceof CustomBodyLimitError ? err.message : controller.signal.aborted ? tr("端点响应超时", "Endpoint timed out") : tr("模型发现请求失败", "Discovery request failed"), fatal: err instanceof CustomBodyLimitError };
 	} finally {
 		clearTimeout(timer);
 	}
@@ -233,7 +234,7 @@ const META_CONTEXT_KEYS = ["n_ctx"] as const;
 function extractModels(body: unknown): CustomModel[] | null {
 	const rows = modelRows(body);
 	if (rows === null) return null;
-	if (rows.length > 10_000) throw new CustomBodyLimitError("Model list exceeds 10000 entries");
+	if (rows.length > 10_000) throw new CustomBodyLimitError(tr("模型列表超过 10000 项", "Model list exceeds 10000 entries"));
 	const byId = new Map<string, CustomModel>();
 	for (const row of rows) {
 		if (typeof row === "string") {

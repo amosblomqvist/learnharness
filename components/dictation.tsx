@@ -8,6 +8,7 @@ import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
+import { tr } from "@/src/core";
 export { isDictationActive } from "@/components/dictation-state";
 
 /**
@@ -109,8 +110,8 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * (desktop) or .env.local (dev)") — the surface says the short truth
  * instead. Exported for pins; the errored idle button's click recognizes
  * it and deep-links Settings → Keys → the Deepgram row. */
-export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
-export const DICTATION_ACTIVE_ELSEWHERE = "Dictation is active elsewhere";
+export const DICTATION_KEYLESS = tr("语音听写需要 Deepgram 密钥", "Dictation needs a Deepgram key");
+export const DICTATION_ACTIVE_ELSEWHERE = tr("语音听写正在其他位置使用", "Dictation is active elsewhere");
 
 // Mounted controllers do not claim capture. Only start() acquires the single
 // window-wide owner, synchronously, before settings/mic/token awaits.
@@ -155,7 +156,7 @@ async function mintFreshToken(): Promise<string> {
 	const data = (await res.json()) as { token?: string; message?: string };
 	if (!res.ok || !data.token) {
 		if (res.status === 503) throw new Error(DICTATION_KEYLESS);
-		throw new Error(data.message ?? `token route ${res.status}`);
+		throw new Error(data.message ?? tr(`token 接口出错（${res.status}）`, `token route ${res.status}`));
 	}
 	return data.token;
 }
@@ -411,7 +412,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 		// A second cleanup (cancel/dispose) cannot turn an unfinished async
 		// append into a successful finish: that would send the old draft.
 		let failure: { error: unknown } | null = appendPendingRef.current
-			? { error: new DOMException("Dictation transcript delivery canceled", "AbortError") }
+			? { error: new DOMException(tr("听写文本的写入已取消", "Dictation transcript delivery canceled"), "AbortError") }
 			: null;
 		appendPendingRef.current = false;
 		try {
@@ -442,7 +443,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			if (endGen !== genRef.current) return;
 			appendPendingRef.current = false;
 			appendFailureRef.current = failed;
-			if (failed) setError(failed.error instanceof Error ? failed.error.message : "Dictation transcript could not be applied");
+			if (failed) setError(failed.error instanceof Error ? failed.error.message : tr("无法写入听写文本", "Dictation transcript could not be applied"));
 			if (recordingOwner === owner) {
 				recordingOwner = null;
 				recordingTarget = null;
@@ -517,12 +518,12 @@ export function useDictation({ append, destination = "primary", disabled = false
 						})
 						.catch(() => {
 							if (gen === genRef.current) {
-								setError("Deepgram reconnect failed");
+								setError(tr("Deepgram 重连失败", "Deepgram reconnect failed"));
 								cleanup();
 							}
 						});
 				} else {
-					setError(`Deepgram connection lost (${ev.code})`);
+					setError(tr(`Deepgram 连接已断开（${ev.code}）`, `Deepgram connection lost (${ev.code})`));
 					cleanup();
 				}
 			});
@@ -554,7 +555,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			language = await getLanguage();
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "Dictation language unavailable");
+			setError(e instanceof Error ? e.message : tr("语音听写语言不可用", "Dictation language unavailable"));
 			cleanup();
 			return;
 		}
@@ -615,10 +616,10 @@ export function useDictation({ append, destination = "primary", disabled = false
 			if (gen !== genRef.current) return;
 			const msg =
 				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
-					? "Microphone permission denied"
+					? tr("麦克风权限被拒绝", "Microphone permission denied")
 					: e instanceof Error
 						? e.message
-						: "mic unavailable";
+						: tr("麦克风不可用", "mic unavailable");
 			setError(msg);
 			cleanup();
 			return;
@@ -629,7 +630,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			token = await tokenPromise;
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "token unavailable");
+			setError(e instanceof Error ? e.message : tr("token 不可用", "token unavailable"));
 			cleanup();
 			return;
 		}
@@ -809,7 +810,7 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 		return (
 			<Hint
 				// The error line truncates in the button; its tooltip reveals it.
-				label={error ?? "Dictate"}
+				label={error ?? tr("语音听写", "Dictate")}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
@@ -824,12 +825,12 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 						}
 					}}
 					disabled={disabled || blocked}
-					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+					aria-label={error ? tr(`语音听写失败：${error}`, `Dictation failed: ${error}`) : tr("开始语音听写", "Start dictation")}
 					data-testid="dictation-toggle"
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
 					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					<span className="max-w-full truncate">{error ?? tr("语音听写", "Dictate")}</span>
 				</button>
 			</Hint>
 		);
@@ -837,17 +838,17 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 
 	return (
 		<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
-			<Hint label="Stop dictation (Esc)" side="top">
+			<Hint label={tr("停止语音听写（Esc）", "Stop dictation (Esc)")} side="top">
 				<button
 					type="button"
 					onClick={toggle}
 					disabled={phase === "stopping"}
-					aria-label="Stop dictation"
+					aria-label={tr("停止语音听写", "Stop dictation")}
 					data-testid="dictation-toggle"
 					className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
 				>
 					{phase === "stopping" ? <Loader2Icon className="size-3.5 animate-spin" /> : <MicIcon className="size-3.5" />}
-					Stop
+					{tr("停止", "Stop")}
 				</button>
 			</Hint>
 			<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />

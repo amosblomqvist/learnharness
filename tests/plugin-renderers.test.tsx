@@ -170,7 +170,7 @@ describe("native tool renderer dispatch", () => {
 	it("unknown tools retain the existing expandable card and native text/images when details are absent", () => {
 		const html = renderToStaticMarkup(<ToolPartRenderer part={nativePart({ result: { content: [{ type: "text", text: "native answer without details" }, { type: "image", data: "NEVER_RENDER_IMAGE_BYTES", mimeType: "image/png" }], details: undefined, isError: false } })} />);
 		assert.ok(html.includes('data-testid="tool-call-card"')); assert.ok(html.includes("custom_tool"));
-		assert.ok(html.includes("native answer without details")); assert.ok(html.includes("Image attached to the model: image/png"));
+		assert.ok(html.includes("native answer without details")); assert.ok(html.includes("[已附加给模型的图片：image/png]"));
 		assert.ok(!html.includes("NEVER_RENDER_IMAGE_BYTES"));
 		const details = renderToStaticMarkup(<ToolPartRenderer part={nativePart({ output: { structured: "details remain readable" } })} />);
 		assert.ok(details.includes("details remain readable"));
@@ -286,7 +286,7 @@ describe("plugin background result rendering", () => {
 			await h.render(<ActivitySection feed={feed} />);
 			assert.ok(document.body.textContent?.includes("Source checker"));
 			const button = document.querySelector('[data-testid="activity-abort"]')!;
-			assert.equal(button.getAttribute("aria-label"), "End Plugin worker in Source checker");
+			assert.equal(button.getAttribute("aria-label"), "结束“Source checker”中的插件智能体");
 			await act(async () => { button.dispatchEvent(new window.Event("click", { bubbles: true })); });
 			assert.deepEqual(calls, [{ url: "/api/activity/abort", body: { kind: "job", id: "plugin-job" } }]);
 		} finally { globalThis.fetch = savedFetch; await h.close(); }

@@ -199,7 +199,7 @@ test("saved required refinement absence remains unavailable; GET readiness uses 
 	assert.equal(pluginQuestionAvailabilityOf({ messages: canonical }, available)?.status, "available");
 	assert.equal(pluginQuestionAvailabilityOf({ messages: changed }, available)?.status, "unavailable");
 	assert.equal(pluginQuestionAvailabilityOf({ messages: canonical })?.status, "unavailable");
-	assert.throws(() => preparePluginQuestionAnswer({ id: "fixture", messages: changed }, { type: "plugin-question-answer", questionId: old.questionId, occurrence: old.occurrence, answer: "" }, available), /unavailable/);
+	assert.throws(() => preparePluginQuestionAnswer({ id: "fixture", messages: changed }, { type: "plugin-question-answer", questionId: old.questionId, occurrence: old.occurrence, answer: "" }, available), /所需的问题校验实现不可用/);
 });
 
 test("chat-handler saves the genuine native answer before teacher construction, rejects duplicate input, and manual dismissal starts no turn", async () => {

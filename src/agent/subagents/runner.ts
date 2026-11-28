@@ -26,8 +26,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ModelRole } from "../../../config.ts";
-import { ROLE_SLOT, modelsNotConfigured, type ModelSlotName, type ProviderKeyMissing } from "../../core/settings.ts";
+import { MODELS_NOT_CONFIGURED_EN, ROLE_SLOT, modelsNotConfigured, providerKeyMissingEn, type ModelSlotName, type ProviderKeyMissing } from "../../core/settings.ts";
 import type { ChatStore, JobStore } from "../../core/ports.ts";
+import { tr } from "../../core/i18n.ts";
 import { runDemoBuilder } from "./demo-builder.ts";
 import { runPdfReaderAgent } from "./pdf-reader.ts";
 import { runResearcherAgent } from "./researcher.ts";
@@ -202,7 +203,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const run = KIND_RUNNERS[job.kind];
 		if (!run) {
 			console.error(`[job ${jobId}] unknown kind: ${job.kind}`);
-			jobStore.updateJob(jobId, { status: "error", error: `unknown kind ${job.kind}`, activity: "failed" });
+			jobStore.updateJob(jobId, { status: "error", error: `unknown kind ${job.kind}`, activity: tr("失败", "failed") });
 			return;
 		}
 		const engine = pickEngine(job.kind);
@@ -214,8 +215,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		// then steer the kind's failure shape through finishJob so the wake
 		// pipeline resumes the lesson and the teacher reads the refusal
 		// instead of waiting forever on a job it already dispatched.
-		const refuse = async (reason: string): Promise<void> => {
-			if (stillRunning(jobId)) jobStore.updateJob(jobId, { error: reason });
+		// `error` is the human (localized) record line; `reason` is the
+		// model-facing English the failure shape steers to the teacher.
+		const refuse = async (error: string, reason: string): Promise<void> => {
+			if (stillRunning(jobId)) jobStore.updateJob(jobId, { error });
 			const resolved = resolveInput(job, input) as
 				| ResearchToolInput
 				| DemoToolInput
@@ -228,7 +231,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 					? { brief: `Research failed: ${reason}`, sources: [] }
 					: job.kind === "demo"
 						? {
-								title: typeof (resolved as DemoToolInput | undefined)?.title === "string" && (resolved as DemoToolInput).title.trim() ? (resolved as DemoToolInput).title : "Interactive demo",
+								title: typeof (resolved as DemoToolInput | undefined)?.title === "string" && (resolved as DemoToolInput).title.trim() ? (resolved as DemoToolInput).title : tr("互动演示", "Interactive demo"),
 								html: "",
 								tested: true,
 								notes: `FAILED: ${reason}`,
@@ -248,7 +251,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			const tier = ROLE_SLOT[KIND_ROLE[job.kind]];
 			const envelope = modelsNotConfigured([tier]);
 			console.info(`[job ${jobId}] refused — ${JSON.stringify(envelope)}`);
-			await refuse(`${envelope.error} (missing: ${tier})`);
+			await refuse(`${envelope.error} (missing: ${tier})`, `${MODELS_NOT_CONFIGURED_EN} (missing: ${tier})`);
 			return;
 		}
 		// Key presence (2026-09-25): the engine exists, but its provider's
@@ -259,7 +262,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			deps.providerKeyMissing?.(engine.model.provider, ROLE_SLOT[KIND_ROLE[job.kind]]) ?? null;
 		if (keyRefusal) {
 			console.info(`[job ${jobId}] refused — ${JSON.stringify(keyRefusal)}`);
-			await refuse(keyRefusal.error);
+			await refuse(keyRefusal.error, providerKeyMissingEn(keyRefusal.provider));
 			return;
 		}
 		try {
@@ -315,7 +318,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		jobStore.updateJob(jobId, {
 			result,
 			status: failed ? "error" : "done",
-			activity: failed ? "failed" : "finished",
+			activity: failed ? tr("失败", "failed") : tr("已完成", "finished"),
 			delivery: { kind: "result", status: "pending" },
 		});
 		// The saved result now belongs to the session. Do not keep the worker,
@@ -331,7 +334,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		if (!job || job.status !== "running") return null;
 		const chat = chatStore.getChat(job.chatId);
 		if (!chat) {
-			jobStore.updateJob(jobId, { status: "error", error: `Chat not found: ${job.chatId}`, activity: "failed" });
+			jobStore.updateJob(jobId, { status: "error", error: `Chat not found: ${job.chatId}`, activity: tr("失败", "failed") });
 			return null;
 		}
 		return { job, chatId: job.chatId };
@@ -373,7 +376,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const pdfDir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-research-"));
 
 		try {
-			jobStore.updateJob(jobId, { activity: "researching" });
+			jobStore.updateJob(jobId, { activity: tr("调研中", "researching") });
 			const brief = await runResearcherAgent(prompt, {
 				engine: model,
 				search: deps.searchProvider,
@@ -420,11 +423,11 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const { job } = ctx;
 
 		const input = (passedInput ?? resolveInput(job, passedInput)) as DemoToolInput | undefined;
-		const title = typeof input?.title === "string" && input.title.trim() ? input.title : "Interactive demo";
+		const title = typeof input?.title === "string" && input.title.trim() ? input.title : tr("互动演示", "Interactive demo");
 		const brief = typeof input?.brief === "string" ? input.brief : "";
 
 		try {
-			jobStore.updateJob(jobId, { activity: "building demo" });
+			jobStore.updateJob(jobId, { activity: tr("正在构建互动演示", "building demo") });
 			const result = await runDemoBuilder(
 				{ title, brief },
 				{
@@ -466,7 +469,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			// and rides into the maker bounded for storage.
 			let image: LearnerImage | undefined;
 			if (imagePath !== undefined) {
-				jobStore.updateJob(jobId, { activity: "loading image" });
+				jobStore.updateJob(jobId, { activity: tr("正在加载图片", "loading image") });
 				image = await loadLearnerImage(imagePath, loop.abortSignal);
 			}
 			// A PDF page: the maker crops the figure itself, so the stored
@@ -476,10 +479,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			let annotated: LearnerImage | undefined;
 			try {
 				if (pdfInput) {
-					jobStore.updateJob(jobId, { activity: `rendering page ${pdfInput.page}` });
+					jobStore.updateJob(jobId, { activity: tr(`正在渲染第 ${pdfInput.page} 页`, `rendering page ${pdfInput.page}`) });
 					pdf = await loadPdfFigureSource(pdfInput.path, pdfInput.page, loop.abortSignal);
 				}
-				jobStore.updateJob(jobId, { activity: pdf ? "finding figure" : image ? "annotating image" : "drawing figure" });
+				jobStore.updateJob(jobId, { activity: pdf ? tr("正在查找插图", "finding figure") : image ? tr("正在标注图片", "annotating image") : tr("正在绘制插图", "drawing figure") });
 				result = await runVisualMaker(
 					{ brief, image, pdf },
 					{
@@ -525,7 +528,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const question = typeof input?.question === "string" ? input.question : "";
 
 		try {
-			jobStore.updateJob(jobId, { activity: "reading pdf" });
+			jobStore.updateJob(jobId, { activity: tr("正在阅读 PDF", "reading pdf") });
 			const result = await runPdfReaderAgent(
 				{ path, question },
 			{
@@ -568,13 +571,13 @@ function isPdfFailure(result: PdfResult): boolean {
 
 /** The activity line shown in the UI: `web_search: "query"` / `web_fetch: host`. */
 function activityLine(toolName: string, input: { query?: string; url?: string } | undefined): string {
-	if (toolName === "web_search") return `web_search: "${input?.query ?? ""}"`;
-	if (toolName === "web_fetch") return `web_fetch: ${hostOf(input?.url)}`;
+	if (toolName === "web_search") return tr(`搜索网页：“${input?.query ?? ""}”`, `web_search: "${input?.query ?? ""}"`);
+	if (toolName === "web_fetch") return tr(`抓取网页：${hostOf(input?.url)}`, `web_fetch: ${hostOf(input?.url)}`);
 	return toolName;
 }
 
 function hostOf(url: string | undefined): string {
-	if (!url) return "(no url)";
+	if (!url) return tr("（无网址）", "(no url)");
 	try {
 		return new URL(url).hostname;
 	} catch {

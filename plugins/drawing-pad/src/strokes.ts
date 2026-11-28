@@ -1,3 +1,4 @@
+import { tr } from "./i18n.ts";
 /** Adapted from hrdkj/learnharness, codex/handwriting-contribution (48dd022).
  * See THIRD-PARTY.md. Coordinates and pressure remain in unrestricted world space. */
 export interface Point { x: number; y: number; pressure: number }
@@ -160,6 +161,6 @@ export function paintStrokes(context: CanvasRenderingContext2D, width: number, h
 export function paintInk(canvas: HTMLCanvasElement, width: number, height: number, strokes: readonly Stroke[], color: string,
   origin: { x: number; y: number } = { x: 0, y: 0 }): void {
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("Could not create the drawing canvas.");
+  if (!context) throw new Error(tr("无法创建绘图画布。", "Could not create the drawing canvas."));
   paintStrokes(context, width, height, visibleStrokes(strokes), color, origin);
 }

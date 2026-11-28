@@ -135,7 +135,7 @@ test("desktop drop inserts quoted paths at the focused editor caret instead of t
 test("a successful drop clears an earlier failure without replacing it with a confirmation bubble", async () => {
 	const f = await fixture();
 	await f.event("drop", f.transfer([f.file("virtual.pdf")]));
-	assert.match(f.status, /No local file paths were available/);
+	assert.match(f.status, /没有可用的本地文件路径/);
 	await f.event("drop", f.transfer([f.file("valid.pdf", "/existing/valid.pdf")]));
 	assert.deepEqual(f.appends, ["`/existing/valid.pdf`"]);
 	assert.equal(f.doc.querySelector('[role="status"]'), null);
@@ -158,14 +158,14 @@ test("browser drop prevents navigation, explains desktop-only local paths and ne
 	const transfer = f.transfer([f.file("/not/a/backing/path.pdf")]);
 	const enter = await f.event("dragenter", transfer);
 	assert.equal(enter.defaultPrevented, true);
-	assert.match(f.doc.querySelector('[data-testid="file-path-drop-indicator"]')!.textContent!, /desktop app/);
+	assert.match(f.doc.querySelector('[data-testid="file-path-drop-indicator"]')!.textContent!, /桌面应用/);
 	const over = await f.event("dragover", transfer);
 	assert.equal(over.defaultPrevented, true);
 	assert.equal(transfer.dropEffect, "copy");
 	const drop = await f.event("drop", transfer);
 	assert.equal(drop.defaultPrevented, true);
-	assert.match(f.status, /Local file paths can only be attached in the desktop app/);
-	assert.match(f.status, /paste a full path instead/);
+	assert.match(f.status, /只有桌面应用才能附加本地文件路径/);
+	assert.match(f.status, /直接粘贴完整路径/);
 	assert.equal(f.doc.querySelector('[data-testid="file-path-drop-indicator"]'), null);
 	assert.equal(f.value, "readthis");
 	assert.deepEqual(f.appends, []);
@@ -183,7 +183,7 @@ test("mixed files and directories retain one original path each in drop order; i
 	await f.event("drop", f.transfer(files, [3]));
 	assert.deepEqual(f.appends, ["`/directory/` `/existing/valid.pdf`"]);
 	assert.equal(f.resolved.includes(files[3]!), true, "a directory resolves through the same OS backing-path bridge");
-	assert.match(f.status, /Some dropped items had no available file path/);
+	assert.match(f.status, /部分拖入的项目没有可用的文件路径/);
 	f.assertPathOnly();
 });
 
@@ -214,9 +214,9 @@ test("a drop with no backing paths or no destination has a truthful notice and s
 	const f = await fixture({ claimed: false });
 	const missing = await f.event("drop", f.transfer([f.file("virtual.pdf")]));
 	assert.equal(missing.defaultPrevented, true);
-	assert.match(f.status, /No local file paths were available/);
+	assert.match(f.status, /没有可用的本地文件路径/);
 	await f.event("drop", f.transfer([f.file("valid.pdf", "/existing/valid.pdf")]));
-	assert.match(f.status, /Open a chat to attach file paths/);
+	assert.match(f.status, /请先打开一个会话再附加文件路径/);
 	assert.deepEqual(f.appends, []);
 	assert.equal(f.value, "readthis");
 	f.assertPathOnly();
@@ -247,7 +247,7 @@ test("nested enter/leave depth keeps the drop overlay until the zone is left; no
 	assert.equal(f.doc.querySelector('[data-testid="file-path-drop-indicator"]'), null);
 	await f.event("drop", transfer);
 	assert.notEqual(f.status, "");
-	await act(async () => { f.doc.querySelector<HTMLElement>('[aria-label="Dismiss attachment notice"]')!.click(); });
+	await act(async () => { f.doc.querySelector<HTMLElement>('[aria-label="关闭附件提示"]')!.click(); });
 	assert.equal(f.status, "");
 	f.assertPathOnly();
 });

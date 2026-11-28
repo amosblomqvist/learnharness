@@ -22,12 +22,13 @@
  */
 import { assertPluginQuestionInputAllowed, ChatInputError, dismissAppends, emit, parseDismissInput } from "@/src/core";
 import { abortTurn, getChat, isTurnRunning, parkDismissal, stores, preparePluginQuestionDismissal, reconcilePluginQuestionCompatibility } from "@/src/server";
+import { tr } from "@/src/core";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	let chat = getChat(id);
-	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	if (!chat) return Response.json({ error: tr("找不到该会话", "Unknown chat") }, { status: 404 });
 
 	let input;
 	try {
@@ -44,7 +45,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	// never overwrite entries appended while this body was arriving. Plugin
 	// targets additionally require exact saved-occurrence authority below.
 	chat = getChat(id);
-	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	if (!chat) return Response.json({ error: tr("找不到该会话", "Unknown chat") }, { status: 404 });
 
 	let appends;
 	try {

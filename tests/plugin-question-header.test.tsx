@@ -240,7 +240,7 @@ test("footer is after host thinking, stays generation-owned on adoption, and can
 	assert.equal(mounts, 1, "canonical adoption does not remount any slot");
 	assert.equal(context.footerContainer, original);
 	context.footerContainer!.replaceChildren(h.document.createTextNode("replacement model solution"));
-	assert.equal(thinking.querySelector("button")!.textContent, "YOUR THINKING");
+	assert.equal(thinking.querySelector("button")!.textContent, "你的思考");
 	assert.match(card.textContent!, /replacement model solution/);
 	await h.close();
 	assert.equal(original!.isConnected, false);

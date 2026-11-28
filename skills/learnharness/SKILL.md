@@ -1,6 +1,6 @@
 ---
 name: learnharness
-description: Read and understand a person's local LearnHarness learning data—teaching and practice sessions, answers, confidence, learner thinking, propositions, and reasoning chains. Use when a request benefits from their learning history or asks to explore, connect, or analyze that history.
+description: Read and understand a person's local LearnHarness learning data—teaching and practice sessions, answers, confidence, learner thinking, propositions, and reasoning chains. Use when a request benefits from their learning history or asks to explore, connect, or analyze that history. 当用户提到 LearnHarness 学习记录、学过什么、之前的会话/答题/把握度/思考、知识图谱中的命题或推理链，或希望结合其学习历史来解释、复盘、分析时使用。
 license: AGPL-3.0-only
 compatibility: Python 3.10+ and access to the user's local LearnHarness data folder. Standard library only; no network, running app, or repository checkout required.
 ---

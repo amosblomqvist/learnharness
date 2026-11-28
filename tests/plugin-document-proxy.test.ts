@@ -99,7 +99,7 @@ it("current Proxy config leaves a valid no-Content-Length multipart document con
 const methods = ["POST", "GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 const secret = "a".repeat(64);
 const capabilityHeader = "x-learnharness-desktop";
-const forbidden = { error: "Desktop API access requires the trusted LearnHarness window." };
+const forbidden = { error: "访问桌面 API 需要通过受信任的 LearnHarness 窗口。" };
 
 async function withDesktopEnvironment(marker: string | undefined, capability: string | undefined, run: () => Promise<void>) {
 	const beforeMarker = process.env.LH_DESKTOP_SERVER, beforeCapability = process.env.LH_DESKTOP_API_SECRET;

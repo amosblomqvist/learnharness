@@ -1,4 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
+import { tr } from "../../core/i18n.ts";
 
 export type CliUsage = Partial<Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite">>;
 
@@ -153,7 +154,7 @@ function getText(line: RawCliLine): string {
 function getResultErrorText(line: RawCliLine): string {
 	if (line.result) return line.result;
 	if (line.errors?.length) return line.errors.join("\n");
-	return `claude CLI failed: ${line.subtype ?? "unknown error"}`;
+	return tr(`claude CLI 执行失败：${line.subtype ?? "未知错误"}`, `claude CLI failed: ${line.subtype ?? "unknown error"}`);
 }
 
 export function parseCliLine(text: string): CliEvent | null {

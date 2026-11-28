@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import type { ChatDeleteMode, ChatListItem, FolderDeletionScope } from "@/src/core";
+import { tr } from "@/src/core";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
  *  the delete-nodes option's body in the two-button design): the
@@ -11,8 +12,8 @@ import type { ChatDeleteMode, ChatListItem, FolderDeletionScope } from "@/src/co
 export const TRACES_COPY = {
 	testid: "delete-traces",
 	checkbox: "delete-traces-checkbox",
-	title: "Also remove its graph traces",
-	body: "This session’s topics, links, and events leave the graph too. Topics other sessions or imported notes also cover survive; topics only this session created are removed entirely.",
+	title: tr("同时移除它在图谱中的痕迹", "Also remove its graph traces"),
+	body: tr("该会话的主题、关联和事件也会从图谱中移除。其他会话或导入笔记也涉及的主题会保留；仅由该会话创建的主题将被彻底移除。", "This session’s topics, links, and events leave the graph too. Topics other sessions or imported notes also cover survive; topics only this session created are removed entirely."),
 };
 
 export interface DeleteDialogCopy {
@@ -24,10 +25,10 @@ export interface DeleteDialogCopy {
 }
 
 export const SESSION_DELETE_COPY: DeleteDialogCopy = {
-	label: "Delete session",
+	label: tr("删除会话", "Delete session"),
 	testid: "delete-session-dialog",
-	heading: "Delete session?",
-	body: "This permanently removes the session — its messages, background jobs, and extraction records. Everything it added to the graph stays unless you check below. This cannot be undone.",
+	heading: tr("删除会话？", "Delete session?"),
+	body: tr("这会永久删除该会话 — 包括其消息、后台任务和提取记录。除非勾选下方选项，它添加到图谱中的内容都会保留。此操作无法撤销。", "This permanently removes the session — its messages, background jobs, and extraction records. Everything it added to the graph stays unless you check below. This cannot be undone."),
 	traces: TRACES_COPY,
 };
 
@@ -36,18 +37,24 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 /** The folder Delete's wording (owner, 2026-11-18): the session dialog's
  *  shape, plural, saying what goes and where notes move. */
 export function folderDeleteCopy(input: { sessions: number; subfolders: number; notes: number; parentName: string | null }): DeleteDialogCopy {
-	const what = [count(input.sessions, "session", "sessions"), ...(input.subfolders ? [count(input.subfolders, "subfolder", "subfolders")] : [])].join(" and ");
+	const what = tr(
+		[`${input.sessions} 个会话`, ...(input.subfolders ? [`${input.subfolders} 个子文件夹`] : [])].join("和 "),
+		[count(input.sessions, "session", "sessions"), ...(input.subfolders ? [count(input.subfolders, "subfolder", "subfolders")] : [])].join(" and "),
+	);
 	const notes = input.notes
-		? ` ${count(input.notes, "imported notes file", "imported notes files")} inside ${input.notes === 1 ? "moves" : "move"} to ${input.parentName === null ? "the top level" : `“${input.parentName}”`}.`
+		? tr(
+			`其中的 ${input.notes} 个导入笔记文件将移至${input.parentName === null ? "顶层" : `“${input.parentName}”`}。`,
+			` ${count(input.notes, "imported notes file", "imported notes files")} inside ${input.notes === 1 ? "moves" : "move"} to ${input.parentName === null ? "the top level" : `“${input.parentName}”`}.`,
+		)
 		: "";
 	return {
-		label: "Delete folder",
+		label: tr("删除文件夹", "Delete folder"),
 		testid: "delete-folder-dialog",
-		heading: "Delete folder?",
-		body: `This permanently removes the folder and the ${what} inside — the sessions’ messages, background jobs, and extraction records. Everything they added to the graph stays unless you check below.${notes} This cannot be undone.`,
+		heading: tr("删除文件夹？", "Delete folder?"),
+		body: tr(`这会永久删除该文件夹及其中的 ${what} — 包括这些会话的消息、后台任务和提取记录。除非勾选下方选项，它们添加到图谱中的内容都会保留。${notes}此操作无法撤销。`, `This permanently removes the folder and the ${what} inside — the sessions’ messages, background jobs, and extraction records. Everything they added to the graph stays unless you check below.${notes} This cannot be undone.`),
 		traces: {
-			title: "Also remove their graph traces",
-			body: "These sessions’ topics, links, and events leave the graph too. Topics other sessions or imported notes also cover survive; topics only these sessions created are removed entirely.",
+			title: tr("同时移除它们在图谱中的痕迹", "Also remove their graph traces"),
+			body: tr("这些会话的主题、关联和事件也会从图谱中移除。其他会话或导入笔记也涉及的主题会保留；仅由这些会话创建的主题将被彻底移除。", "These sessions’ topics, links, and events leave the graph too. Topics other sessions or imported notes also cover survive; topics only these sessions created are removed entirely."),
 		},
 	};
 }
@@ -119,13 +126,13 @@ export function DeleteSessionDialog({
 			if (!res.ok) {
 				// 409 (turn/jobs running) and 503 (extraction winding down) are
 				// both retryable — keep the dialog open, show the server's line.
-				setFailure({ code: body.code ?? "error", error: body.error ?? `Delete failed (${res.status})` });
+				setFailure({ code: body.code ?? "error", error: body.error ?? tr(`删除失败（${res.status}）`, `Delete failed (${res.status})`) });
 				setBusy(false);
 				return;
 			}
 			onDeleted(chat.id, mode, body.graphRevision ?? 0);
 		} catch {
-			setFailure({ code: "network", error: "Delete failed — network error. Try again." });
+			setFailure({ code: "network", error: tr("删除失败 — 网络错误，请重试。", "Delete failed — network error. Try again.") });
 			setBusy(false);
 		}
 	};
@@ -224,7 +231,7 @@ export function DeleteSessionBody({
 						disabled={busy}
 						className="ml-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40"
 					>
-						Try again
+						{tr("重试", "Try again")}
 					</button>
 				</div>
 			)}
@@ -239,7 +246,7 @@ export function DeleteSessionBody({
 					disabled={busy}
 					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
 				>
-					Cancel
+					{tr("取消", "Cancel")}
 				</button>
 				<button
 					type="button"
@@ -248,7 +255,7 @@ export function DeleteSessionBody({
 					disabled={busy}
 					className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-40"
 				>
-					{busy ? "Deleting…" : "Delete"}
+					{busy ? tr("删除中…", "Deleting…") : tr("删除", "Delete")}
 				</button>
 			</div>
 		</div>
@@ -292,17 +299,17 @@ export function DeleteFolderDialog({
 			});
 			const body = (await res.json()) as { error?: string; code?: string; graphRevision?: number; deletedChatIds?: string[] };
 			if (body.code === "folder_scope_changed" || body.code === "not_found") {
-				onStale(body.error ?? "This folder changed. Nothing was deleted.");
+				onStale(body.error ?? tr("该文件夹已发生变化，未删除任何内容。", "This folder changed. Nothing was deleted."));
 				return;
 			}
 			if (!res.ok) {
-				setFailure({ code: body.code ?? "error", error: body.error ?? `Delete failed (${res.status})` });
+				setFailure({ code: body.code ?? "error", error: body.error ?? tr(`删除失败（${res.status}）`, `Delete failed (${res.status})`) });
 				setBusy(false);
 				return;
 			}
 			onDeleted({ deletedChatIds: body.deletedChatIds ?? [], graphRevision: body.graphRevision ?? 0 });
 		} catch {
-			setFailure({ code: "network", error: "Delete failed — network error. Try again." });
+			setFailure({ code: "network", error: tr("删除失败 — 网络错误，请重试。", "Delete failed — network error. Try again.") });
 			setBusy(false);
 		}
 	};

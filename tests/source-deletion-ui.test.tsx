@@ -67,7 +67,7 @@ it("a failed deletion keeps its original confirmation targets for retry even aft
 it("clearing ordinary source selection does not clear the caller's independent practice node picks", async () => {
 	let changes = 0; globalThis.fetch = async () => Response.json(directory());
 	await mount(<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} controlledSelection={new Set(["practice-node"])} onSelectionChange={() => { changes++; }} onClose={() => {}} />);
-	await click("cluster-checkbox-a"); assert.match(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent!, /1 source/);
+	await click("cluster-checkbox-a"); assert.match(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent!, /1 个来源/);
 	await click("chain-clear"); assert.equal(document.querySelector('[data-testid="chain-selection-bar"]'), null); assert.equal(changes, 0);
 });
 const practiceDirectory = (): SourceDirectory => ({
@@ -102,7 +102,7 @@ for (const selectMode of [false, true]) it(`reopening ${selectMode ? "practice p
 	assert.equal(document.querySelector('[data-testid="cluster-group-practice"]'), null);
 	assert.ok(document.querySelector('[data-testid="cluster-group-a"]'));
 	assert.ok(document.querySelector('[data-testid="cluster-group-unknown"]'), "genuinely unknown provenance remains visible after a successful read");
-	if (selectMode) assert.equal(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent, "1 node → 1 chain");
+	if (selectMode) assert.equal(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent, "1 个节点 → 1 条推理链");
 	assert.deepEqual(changes, [], "closing/refreshing never rewrites caller-owned picks");
 });
 
@@ -132,7 +132,7 @@ it("folder selection, counts and confirmed source deletion exclude hidden practi
 	};
 	await mount(<ChainTableOverlay open nodes={[sourceNode("historical", "practice")]} chains={[]} sessions={{ practice: "Hidden practice" }} fileSources={{}} onClose={() => {}} />);
 	await click("folder-checkbox-f");
-	assert.equal(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent, "2 sources · 1 folder");
+	assert.equal(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent, "2 个来源 · 1 个文件夹");
 	await click("folder-icon-f");
 	assert.equal(document.querySelector('[data-testid="cluster-checkbox-practice"]'), null);
 	for (const id of ["a", "b"]) assert.equal(document.querySelector<HTMLInputElement>(`[data-testid="cluster-checkbox-${id}"]`)!.checked, true);
@@ -162,8 +162,8 @@ it("minimal home refreshes its snapshot and summary immediately after source del
 		throw new Error("No synthetic cost response");
 	};
 	await mount(<MinimalHome />);
-	assert.match(document.querySelector('[data-testid="knowledge-summary"]')!.textContent!, /1 imported note/);
+	assert.match(document.querySelector('[data-testid="knowledge-summary"]')!.textContent!, /1 份导入的笔记/);
 	await click("open-chain-table"); await click("cluster-checkbox-a"); await click("chain-delete"); await click("source-delete-confirm");
-	assert.match(document.querySelector('[data-testid="knowledge-summary"]')!.textContent!, /0 imported notes/);
+	assert.match(document.querySelector('[data-testid="knowledge-summary"]')!.textContent!, /0 份导入的笔记/);
 	assert.equal(document.querySelector('[data-testid="cluster-checkbox-a"]'), null);
 });

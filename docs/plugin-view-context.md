@@ -1,15 +1,14 @@
-# Whole-session view context for actions — API v1
+# 操作的整个会话视图上下文 — API v1
 
-Whole-session read-only context is general infrastructure, not a Drawing Pad-specific
-or current-question-only API. This describes the matching source/build. Use the downloaded skill's `bundle.json` to identify the
-app; API v1 alone does not identify every available capability. Public types live in `src/core/plugin-view-context.ts` and the
-matching type-only SDK.
+整个会话的只读上下文是通用基础设施，而不是 Drawing Pad 专用或仅限当前问题的 API。本文描述的是与之匹配的
+源码/构建版本。请使用所下载 skill 中的 `bundle.json` 来识别应用；仅凭 API v1 无法识别所有可用能力。
+公开类型位于 `src/core/plugin-view-context.ts` 以及与之匹配的仅含类型的 SDK 中。
 
-## Public entry point
+## 公开入口
 
-A session top-bar action, or a shortcut action invoked on a session, receives readonly
-`context.view: PluginSessionViewContext`. Keyboard invocations use `placement: "keyboard"`;
-see [action shortcuts](plugin-authoring.md#action-shortcuts) for opt-in and scope rules:
+会话顶栏操作，或在会话上调用的快捷键操作，会收到只读的
+`context.view: PluginSessionViewContext`。键盘调用使用 `placement: "keyboard"`；
+启用方式与作用域规则参见[操作快捷键](plugin-authoring.md#动作快捷键)：
 
 ```ts
 ctx.registerAction({
@@ -35,115 +34,87 @@ ctx.placeAction({
 });
 ```
 
-The existing `placement`, `surface`, `sessionId`, `kind`, and opaque `surfaceTarget`
-remain unchanged. Sidebar/graph contexts and plugin-owned-view action contexts do not
-acquire a host session snapshot. Plugin-owned views retain their owner/view identity;
-their owning plugin already owns their private state. There is no automatic serializer
-for arbitrary plugin DOM or a new plugin-view context-provider protocol.
+现有的 `placement`、`surface`、`sessionId`、`kind` 和不透明的 `surfaceTarget` 保持不变。
+侧边栏/图谱上下文以及插件自有视图的操作上下文不会获得宿主会话快照。插件自有视图保留其所有者/视图身份；
+其私有状态本就归所属插件所有。不存在针对任意插件 DOM 的自动序列化器，也没有新的插件视图上下文提供者协议。
 
-## Whole view, not just a submission
+## 整个视图，而不只是一次提交
 
-`PluginSessionViewContext` contains:
+`PluginSessionViewContext` 包含：
 
-| Field | Meaning |
+| 字段 | 含义 |
 | --- | --- |
-| `sessionId`, `kind`, `title` | The underlying session's identity, teaching/practice kind, and current committed title. |
-| `messages` | Complete detached current browser-native history, with the same visibility as submission-context messages, including potentially streamed or optimistic content. |
-| `transcript` | The existing host-projected transcript (`LhViewMessage` data), including its grouping and parts. Not a DOM serialization, screenshot, or independently parsed transcript. |
-| `status` | Existing `ready`, `submitted`, `streaming`, or `error` session status. |
-| `reconciliation` | Existing `ready`, `syncing`, or `failed` canonical-sync status. |
-| `busy`, `compacting` | Current host turn/reconciliation and compaction state. |
-| `phase` | The displayed `probe`, `plan`, `teach`, or `practice` phase. |
-| `contextTokens` | Existing completed-conversation context-usage estimate, or `null`. |
-| `queuedSteers` | Currently visible queued learner steers, with `id` and `text`. |
-| `composer.text` | Exact unsent composer text, retained even while a question/problem owns the dock. |
-| `input` | The host-selected current input, its applicable presentation state, and unsent learner values. |
+| `sessionId`、`kind`、`title` | 底层会话的身份、教学/练习类型以及当前已提交的标题。 |
+| `messages` | 完整的、已分离的当前浏览器原生历史记录，可见范围与提交上下文中的消息相同，可能包含流式传输中的或乐观的内容。 |
+| `transcript` | 现有的宿主投影对话记录（`LhViewMessage` 数据），包括其分组和各部分。不是 DOM 序列化、截图或独立解析的对话记录。 |
+| `status` | 现有的会话状态：`ready`、`submitted`、`streaming` 或 `error`。 |
+| `reconciliation` | 现有的规范同步状态：`ready`、`syncing` 或 `failed`。 |
+| `busy`、`compacting` | 当前宿主的回合/对账状态以及上下文压缩状态。 |
+| `phase` | 当前显示的 `probe`、`plan`、`teach` 或 `practice` 阶段。 |
+| `contextTokens` | 现有的已完成对话的上下文用量估计，或 `null`。 |
+| `queuedSteers` | 当前可见的、排队中的学习者插话，带有 `id` 和 `text`。 |
+| `composer.text` | 输入框中尚未发送的确切文本，即使问题/题目占用了停靠区也会保留。 |
+| `input` | 宿主选定的当前输入、其适用的展示状态以及学习者尚未发送的值。 |
 
-History is **not** restricted to learner-facing question fields. It may contain tool
-arguments, commitments, reasoning, custom payloads, and other already-exposed native
-records. This trusted-local-plugin API does not create a new secrecy boundary or promise
-canonical persistence, accepted delivery, or exactly-once semantics. Projected transcript
-parts are view-model data; final rendering can still hide pending parts in favor of the
-dock. Neither field is a claim that every byte is currently painted in the viewport.
+历史记录**不**限于面向学习者的问题字段。它可能包含工具参数、承诺、推理、自定义载荷以及其他已暴露的原生
+记录。这个面向受信任本地插件的 API 不会建立新的保密边界，也不承诺规范持久化、已接受的投递或恰好一次语义。
+投影对话记录的各部分是视图模型数据；最终渲染仍可能隐藏待处理的部分，改为显示停靠区。这两个字段都不代表
+每个字节当前都已绘制在视口中。
 
-## Current input and unsent learner input
+## 当前输入与学习者尚未发送的输入
 
-`PluginSessionViewInput` reuses existing submission-target types, including exact
-`{messageId, contentIndex, toolCallId, toolName}` occurrences, session identity, applicable
-channels, and the existing opaque surface target. It is **not** a submission attempt.
+`PluginSessionViewInput` 复用现有的提交目标类型，包括确切的
+`{messageId, contentIndex, toolCallId, toolName}` 出现位置、会话身份、适用的通道以及现有的不透明界面目标。
+它**不是**一次提交尝试。
 
-- **`text`**: the existing ordinary-content target. The retained draft is `view.composer.text`.
-- **`answer`**: the native learner-facing `question`, with actual displayed/shuffled option
-  order, Markdown context, applicable option descriptions, exact occurrence, and optional
-  `questionType`. Adds `expanded`, `revealed`, `available`, and `draft`.
-  `PluginNativeQuestionViewDraft` contains `dontKnow`, stable selected `values`,
-  `otherSelected`, `other`, `text`, `thinking`, `readingThinking`, and optional displayed
-  numeric `confidence`. Other text survives even when its row is not selected. Values
-  are raw drafts, not a normalized/graded answer envelope; whitespace is not trimmed.
-- **`thinking`**: the existing native practice target/statement and exact occurrence,
-  plus `expanded` and `draft.thinking`.
-- **`plugin-question-answer`**: existing plugin-question target identity/metadata, plus
-  saved `input` including payload, `expanded`, `revealed`, implementation `available`,
-  and `draft: {answer, thinking, readingThinking}`.
-- **`plugin-problem-submission`**: existing plugin-problem target identity/metadata, plus
-  saved `input` including payload, `expanded`, implementation `available`, and
-  `draft: {submission, thinking}`.
-- **`unavailable`**: the host cannot interpret/read the pending input. Carries
-  `expanded`, `revealed`, and the exact occurrence when known. It does not invent a
-  composer/native fallback or manufacture an answerable contract.
+- **`text`**：现有的普通内容目标。保留的草稿是 `view.composer.text`。
+- **`answer`**：原生的面向学习者的 `question`，带有实际显示的/打乱后的选项顺序、Markdown 上下文、
+  适用的选项说明、确切的出现位置以及可选的 `questionType`。另加 `expanded`、`revealed`、`available` 和 `draft`。
+  `PluginNativeQuestionViewDraft` 包含 `dontKnow`、稳定的已选 `values`、`otherSelected`、`other`、`text`、
+  `thinking`、`readingThinking`，以及可选的、按显示值给出的数字 `confidence`。即使“其他”行未被选中，
+  其文本也会保留。这些值是原始草稿，而不是规范化/已评分的答案封装；空白不会被裁剪。
+- **`thinking`**：现有的原生练习目标/题述以及确切的出现位置，另加 `expanded` 和 `draft.thinking`。
+- **`plugin-question-answer`**：现有的插件问题目标身份/元数据，另加已保存的 `input`（包括载荷）、
+  `expanded`、`revealed`、实现是否可用的 `available`，以及 `draft: {answer, thinking, readingThinking}`。
+- **`plugin-problem-submission`**：现有的插件题目目标身份/元数据，另加已保存的 `input`（包括载荷）、
+  `expanded`、实现是否可用的 `available`，以及 `draft: {submission, thinking}`。
+- **`unavailable`**：宿主无法解释/读取待处理的输入。带有 `expanded`、`revealed`，以及已知时的确切出现位置。
+  它不会臆造输入框/原生回退，也不会凭空制造可作答的契约。
 
-Custom `answer`/`submission` draft state is the actual published editor state:
-`{status:"empty"}` or `{status:"unready"|"ready",value:JsonValue}`. Finite JSON falsy and
-empty values remain exact. Private editor state that a plugin has not published is not
-read by inspecting its DOM. External plugin-private unsent material is likewise not
-silently harvested. These fields are informational; neither `available` nor an editor's
-`ready` state alone grants permission to submit.
+自定义的 `answer`/`submission` 草稿状态就是实际发布的编辑器状态：
+`{status:"empty"}` 或 `{status:"unready"|"ready",value:JsonValue}`。有限的 JSON 假值和空值保持原样。
+插件尚未发布的私有编辑器状态不会通过检查其 DOM 来读取。外部的插件私有未发送材料同样不会被静默收集。
+这些字段仅供参考；无论是 `available` 还是编辑器的 `ready` 状态，单独都不授予提交权限。
 
-The native question's structured `question` uses the existing `ClientQuestion` projection,
-not its answer keys/explanation/committed answer. The complete history remains available
-separately without artificial filtering. Reveal/collapse flags **describe** the host UI:
-unrevealed question data is still inspectable, but a read never opens/reveals the question.
-A consumer deciding what to render as a learner reference must use the supplied flags
-and its own product behavior, not pretend that inspectable data is already visible.
+原生问题的结构化 `question` 使用现有的 `ClientQuestion` 投影，不包含其答案键/解析/已提交的答案。完整的历史记录
+仍然单独提供，没有人为过滤。揭示/折叠标志**描述**的是宿主 UI：未揭示的问题数据仍然可以查看，但读取绝不会
+打开/揭示问题。决定把哪些内容渲染为学习者参考的使用方，必须依据所提供的标志和自身的产品行为，而不能把
+可查看的数据当作已经可见。
 
-## Snapshot, identity, and lifetime
+## 快照、身份与生命周期
 
-- An actual action invocation captures a fresh snapshot **before** calling plugin `run`.
-  Re-reading `context.view` during/after an await returns that same detached snapshot;
-  it does not follow navigation, a newer occurrence, or subsequent learner edits.
-- The snapshot's data is recursively readonly/frozen. Native history, projected transcript,
-  input/payload, and draft values are detached from live host state. Captures do not grant
-  setters, submission callbacks, or private component handles.
-- Existing opaque surface targets remain live host capabilities. They are deliberately
-  not JSON-cloned or frozen. A captured target still refers to its original underlying
-  view; normal surface lifetime rules govern later use. A stale view cannot silently
-  substitute a new session's content.
-- Dynamic `disabled(context)` predicates receive the same read-only shape. Their
-  render-time snapshot is lazy/shared for that render; the eventual click/shortcut captures anew
-  and checks disabled state again. Host input owners notify ordinary React rendering
-  when their public presentation/drafts change. Plugin-owned external state still uses
-  the existing `refreshActions()` mechanism.
-- Capture failures are contained by existing plugin action error handling. No action
-  runs if its originating view has gone away before capture.
+- 实际的操作调用会在调用插件 `run` **之前**捕获一份新快照。在 await 期间/之后重新读取 `context.view`
+  会返回同一份已分离的快照；它不会跟随导航、更新的出现位置或之后学习者的编辑。
+- 快照的数据是递归只读/冻结的。原生历史记录、投影对话记录、输入/载荷以及草稿值都与实时宿主状态分离。
+  捕获不会授予 setter、提交回调或私有组件句柄。
+- 现有的不透明界面目标仍是实时的宿主能力。它们有意不做 JSON 克隆或冻结。已捕获的目标仍指向其原始的底层
+  视图；之后的使用受常规界面生命周期规则约束。过期的视图不能静默替换为新会话的内容。
+- 动态的 `disabled(context)` 判定收到相同的只读结构。其渲染时快照是延迟生成的，并在该次渲染中共享；
+  最终的点击/快捷键会重新捕获并再次检查禁用状态。宿主输入所有者在其公开的展示/草稿发生变化时，会通知
+  普通的 React 渲染。插件自有的外部状态仍使用现有的 `refreshActions()` 机制。
+- 捕获失败由现有的插件操作错误处理机制兜住。如果发起操作的视图在捕获之前已经消失，则不会运行任何操作。
 
-There is no public subscription/global mutable context API, screenshot service, raw keyboard
-shortcut addition, or new session state model. A snapshot read does not finish dictation,
-request microphone access, persist drafts, invoke submission interceptors, process/grade,
-submit, acknowledge, or send a model request. It reports current typed/published values,
-not a forced flush of pending speech.
+没有公开的订阅/全局可变上下文 API、截图服务、新增的原始键盘快捷键，也没有新的会话状态模型。读取快照不会
+结束语音听写、请求麦克风权限、持久化草稿、调用提交拦截器、处理/评分、提交、确认或发送模型请求。它报告的是
+当前已输入/已发布的值，而不会强制刷出待处理的语音。
 
-## Host implementation and testing
+## 宿主实现与测试
 
-`components/chat.tsx` supplies its existing native history, projected transcript, current
-session metadata and shared submission-target factories. Its native dock publishes a
-private view-local reader. Mounted question/practice components read their actual
-presentation and ref-backed draft state; custom components expose their already-published
-editor value and availability. Cleanup is generation-owned. No second history parser,
-independent shuffle, DOM inspection, global store, polling, or product-plugin dependency
-is introduced.
+`components/chat.tsx` 提供其现有的原生历史记录、投影对话记录、当前会话元数据以及共享的提交目标工厂。
+其原生停靠区发布一个私有的视图局部读取器。已挂载的问题/练习组件读取其实际展示状态和基于 ref 的草稿状态；
+自定义组件暴露其已发布的编辑器值和可用性。清理按代次（generation）归属。不会引入第二个历史解析器、
+独立的打乱逻辑、DOM 检查、全局存储、轮询或对产品插件的依赖。
 
-Test readonly/discriminated SDK types, complete context copying, custom payloads/editor
-states, unavailable input, native input-owner reads, untrimmed drafts, cleanup,
-inline/overflow action freshness, async capture stability, disabled predicates and
-capture-error containment. Exercise the plugin's actual top-bar actions and native/custom
-inputs in an isolated app profile.
+需要测试：只读/可辨识联合的 SDK 类型、完整的上下文复制、自定义载荷/编辑器状态、不可用的输入、原生输入
+所有者的读取、未裁剪的草稿、清理、内联/溢出菜单操作的新鲜度、异步捕获的稳定性、禁用判定以及捕获错误的兜底。
+请在隔离的应用配置文件中试用插件实际的顶栏操作和原生/自定义输入。

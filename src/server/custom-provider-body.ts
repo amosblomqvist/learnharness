@@ -1,15 +1,16 @@
+import { tr } from "../core/i18n.ts";
 /** Byte-bounded JSON for the custom endpoint's request/discovery surfaces. */
 export class CustomBodyLimitError extends Error {}
 
 export async function readBoundedJson(message: Request | Response, limit: number, allowEmptyObject = false): Promise<unknown> {
 	if (Number(message.headers.get("content-length")) > limit) {
 		await message.body?.cancel();
-		throw new CustomBodyLimitError("JSON body exceeds the allowed byte limit");
+		throw new CustomBodyLimitError(tr("JSON 内容超过允许的字节上限", "JSON body exceeds the allowed byte limit"));
 	}
 	const reader = message.body?.getReader();
 	if (!reader) {
 		if (allowEmptyObject) return {};
-		throw new SyntaxError("Missing JSON body");
+		throw new SyntaxError(tr("缺少 JSON 内容", "Missing JSON body"));
 	}
 	const decoder = new TextDecoder();
 	let text = "";
@@ -19,7 +20,7 @@ export async function readBoundedJson(message: Request | Response, limit: number
 			const { done, value } = await reader.read();
 			if (done) break;
 			bytes += value.byteLength;
-			if (bytes > limit) throw new CustomBodyLimitError("JSON body exceeds the allowed byte limit");
+			if (bytes > limit) throw new CustomBodyLimitError(tr("JSON 内容超过允许的字节上限", "JSON body exceeds the allowed byte limit"));
 			text += decoder.decode(value, { stream: true });
 		}
 		if (bytes === 0 && allowEmptyObject) return {};

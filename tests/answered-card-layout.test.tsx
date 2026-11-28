@@ -134,13 +134,13 @@ test("the question card stand-in mirrors the pending card: options, I don't know
 		assert.match(row.className, /items-center/);
 		assert.doesNotMatch(row.firstElementChild!.className, /mt-0\.5/);
 	}
-	assert.ok(quiz.confidence?.textContent?.includes("Confidence"));
+	assert.ok(quiz.confidence?.textContent?.includes("把握度"));
 
 	const ask = questionCardStandIn(document as unknown as Document, {
 		label: "Question", kind: "ask", multiSelect: true,
 		question: live("<p>Q</p>"), context: live("<p>ctx</p>"), options: [live("<p>A</p>")],
 	});
-	assert.equal(ask.question.textContent, "Question · select all that applyQctx");
+	assert.equal(ask.question.textContent, "Question · 可多选Qctx");
 	assert.equal(ask.options.firstElementChild!.children.length, 2, "option + the empty Other field");
 	assert.equal(ask.confidence, null);
 });

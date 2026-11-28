@@ -1,5 +1,7 @@
 // Page-bound review, using only the public plugin UI and RPC contracts.
+import { tr } from './i18n.js';
 const ratings = ["Again", "Hard", "Good", "Easy"];
+const ratingLabels = { Again: "重来", Hard: "困难", Good: "良好", Easy: "简单" };
 const ratingOptions = label => {
   const color = `var(--fc-rating-${label.toLowerCase()})`;
   const tint = percent => `color-mix(in srgb, ${color} ${percent}%, transparent)`;
@@ -18,10 +20,10 @@ const el = (tag, className, text) => {
   return node;
 };
 const interval = ms => {
-  if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s`;
-  if (ms < 3600000) return `${Math.round(ms / 60000)}m`;
-  if (ms < 86400000) return `${Math.round(ms / 3600000)}h`;
-  return `${Math.round(ms / 86400000)}d`;
+  if (ms < 60000) return tr(`${Math.max(1, Math.round(ms / 1000))} 秒`, `${Math.max(1, Math.round(ms / 1000))}s`);
+  if (ms < 3600000) return tr(`${Math.round(ms / 60000)} 分钟`, `${Math.round(ms / 60000)}m`);
+  if (ms < 86400000) return tr(`${Math.round(ms / 3600000)} 小时`, `${Math.round(ms / 3600000)}h`);
+  return tr(`${Math.round(ms / 86400000)} 天`, `${Math.round(ms / 86400000)}d`);
 };
 function lifetime(...parents) {
   const controller = new AbortController();
@@ -70,11 +72,11 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
       const stage = el("div", "fc-review-stage"), title = el("h2", "fc-review-title");
       stage.tabIndex = -1;
       stage.setAttribute("role", "group");
-      stage.setAttribute("aria-label", practice ? "Flashcard practice" : "Flashcard review");
+      stage.setAttribute("aria-label", practice ? tr("闪卡练习", "Flashcard practice") : tr("闪卡复习", "Flashcard review"));
       stage.setAttribute("data-plugin-initial-focus", "");
       title.hidden = true;
       const card = el("div", "fc-review-card"), footer = el("div", "fc-review-footer"), bottom = el("div", "fc-review-bottom");
-      const practiceNote = practice ? el("p", "fc-review-meta fc-practice-note", "Practice mode does not change your review schedule.") : null;
+      const practiceNote = practice ? el("p", "fc-review-meta fc-practice-note", tr("练习模式不会改变你的复习计划。", "Practice mode does not change your review schedule.")) : null;
       stage.append(title, card, bottom, footer);
       root.append(stage);
       if (practiceNote) root.append(practiceNote);
@@ -117,9 +119,9 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
         // Capture this presentation's cue so an overlapping stale control cannot
         // reveal consumed material or advance the shared queue a second time.
         const cs = reset(), index = practiceIndex, cue = practiceCards[index];
-        if (!cue) { footer.append(el("p", "fc-review-meta", "Practice complete.")); return; }
+        if (!cue) { footer.append(el("p", "fc-review-meta", tr("练习完成。", "Practice complete."))); return; }
         const remaining = practiceCards.length - index - 1;
-        const { answer, actions } = question(cue, cs, `${remaining} ${remaining === 1 ? 'card' : 'cards'} remaining`);
+        const { answer, actions } = question(cue, cs, tr(`还剩 ${remaining} 张卡片`, `${remaining} ${remaining === 1 ? 'card' : 'cards'} remaining`));
         let revealButton;
         revealAction = () => {
           if (revealed || cs.aborted || index !== practiceIndex) return;
@@ -131,21 +133,21 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
             if (cs.aborted || !revealed || index !== practiceIndex) return;
             focusOwned(); practiceIndex++; nextPractice();
           };
-          control(actions, "Next", () => advanceAction?.(), cs, "Space", { variant: "outline" });
+          control(actions, tr("下一张", "Next"), () => advanceAction?.(), cs, tr("空格", "Space"), { variant: "outline" });
         };
-        revealButton = control(actions, "Reveal answer", () => revealAction?.(), cs, "Space", { variant: "outline" });
+        revealButton = control(actions, tr("显示答案", "Reveal answer"), () => revealAction?.(), cs, tr("空格", "Space"), { variant: "outline" });
       }
-      const retry = (parent, cs) => button(parent, "Retry next card", nextReview, cs);
+      const retry = (parent, cs) => button(parent, tr("重试下一张卡片", "Retry next card"), nextReview, cs);
       async function nextReview() {
         if (content.signal.aborted) return;
         const pending = reset();
-        footer.append(el("p", "fc-review-meta", "Loading next card…"));
+        footer.append(el("p", "fc-review-meta", tr("正在加载下一张卡片…", "Loading next card…")));
         try {
           const result = await ctx.call("next-review", scope);
           if (pending.aborted) return;
           const cs = reset();
           if (!result.ticket) {
-            footer.append(el("p", "fc-review-meta", result.nextDue ? `No cards ready. Next due ${new Date(result.nextDue).toLocaleString()}.` : "No cards due in this selection."));
+            footer.append(el("p", "fc-review-meta", result.nextDue ? tr(`暂无可复习的卡片。下次到期时间：${new Date(result.nextDue).toLocaleString()}。`, `No cards ready. Next due ${new Date(result.nextDue).toLocaleString()}.`) : tr("所选范围内没有到期的卡片。", "No cards due in this selection.")));
             if (result.nextDue) {
               const arm = () => {
                 if (cs.aborted) return;
@@ -157,7 +159,7 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
             return;
           }
           const ticket = result.ticket;
-          const { answer, actions, error } = question(ticket, cs, result.remaining === undefined ? undefined : `${result.remaining} ready`);
+          const { answer, actions, error } = question(ticket, cs, result.remaining === undefined ? undefined : tr(`${result.remaining} 张待复习`, `${result.remaining} ready`));
           let revealButton, retryButton, revealBusy = false, ratingBusy = false;
           const requests = new Map();
           const failed = cause => {
@@ -201,7 +203,7 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
                 try { void Promise.resolve(onRated?.()).catch(() => {}); } catch { /* A refresh cannot undo an accepted grade. */ }
                 if (!cs.aborted) await nextReview();
               };
-              ratings.forEach((label, index) => ratingButtons.push(control(actions, `${label} · ${interval(result.intervals[index + 1])}`, () => rateAction?.(index + 1), cs, String(index + 1), ratingOptions(label))));
+              ratings.forEach((label, index) => ratingButtons.push(control(actions, `${tr(ratingLabels[label], label)} · ${interval(result.intervals[index + 1])}`, () => rateAction?.(index + 1), cs, String(index + 1), ratingOptions(label))));
             } catch (cause) { failed(cause); }
             finally {
               revealBusy = false;
@@ -210,7 +212,7 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
               }
             }
           };
-          revealButton = control(actions, "Reveal answer", () => revealAction?.(), cs, "Space", { variant: "outline" });
+          revealButton = control(actions, tr("显示答案", "Reveal answer"), () => revealAction?.(), cs, tr("空格", "Space"), { variant: "outline" });
         } catch (cause) {
           if (pending.aborted) return;
           const cs = reset();
@@ -245,7 +247,7 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
     try {
       // Capture the active page now, never after awaiting a review RPC. Content
       // can mount either during this call or later; it owns starting the request.
-      handle = ctx.ui.openSurface({ title: practice ? "Flashcard practice" : "Flashcard review", background: "dimmed", content: mount, onClose: close }, { signal: session.signal });
+      handle = ctx.ui.openSurface({ title: practice ? tr("闪卡练习", "Flashcard practice") : tr("闪卡复习", "Flashcard review"), background: "dimmed", content: mount, onClose: close }, { signal: session.signal });
       if (closed) handle.dispose();
     } catch (cause) { close(); throw cause; }
   }

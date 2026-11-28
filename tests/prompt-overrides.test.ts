@@ -30,6 +30,7 @@ import * as path from "node:path";
 import { after, describe, it } from "node:test";
 import { createFauxCore } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
+import { VOICE_LANGUAGE_RULE, withOutputLanguage } from "../src/agent/output-language.ts";
 
 // ── the seam, BEFORE any config-loading import ──────────────────────────────
 const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-prompt-overrides-"));
@@ -269,8 +270,9 @@ describe("composeInstructions: override honoring + the byte-identical source pat
 				...fragmentsOf("src/agent/prompts/shared"),
 			].join("\n\n---\n\n");
 		};
-		assert.equal(composeInstructions("teacher"), oldLoader("teacher"));
-		assert.equal(composeInstructions("prober"), oldLoader("prober"));
+		// plus the interface-language rule (src/agent/output-language.ts; zh by default)
+		assert.equal(composeInstructions("teacher"), withOutputLanguage(oldLoader("teacher"), VOICE_LANGUAGE_RULE));
+		assert.equal(composeInstructions("prober"), withOutputLanguage(oldLoader("prober"), VOICE_LANGUAGE_RULE));
 	});
 
 	it("an enabled override swaps in; switch off or file absent composes source", () => {
@@ -444,7 +446,7 @@ describe("Practice settings API and effective prompt loading", () => {
 				const row = view.practice.find((s: { path: string }) => s.path === segment);
 				assert.equal(row.enabled, on);
 				assert.equal(row.overrideText, text);
-				const expected = effectivePromptSegments("practice", {}).map((s) => (on && s.path === segment ? text : s.sourceText).trim()).filter(Boolean).join("\n\n---\n\n");
+				const expected = withOutputLanguage(effectivePromptSegments("practice", {}).map((s) => (on && s.path === segment ? text : s.sourceText).trim()).filter(Boolean).join("\n\n---\n\n"), VOICE_LANGUAGE_RULE);
 				assert.equal(loaded(), expected, "actual composed instructions replace exactly one source fragment");
 				for (const kind of ["teacher", "prober"] as const) {
 					assert.equal(teacherAgent.composeInstructions(kind, readSettingsRecord()?.agent?.prompts ?? {}), defaults[kind]);

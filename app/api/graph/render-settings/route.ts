@@ -13,6 +13,7 @@
  * touching disk: garbage clamps or falls back to defaults, never throws.
  */
 import { readRenderSettings, writeRenderSettings } from "@/src/server";
+import { tr } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export async function PUT(request: Request) {
 	try {
 		body = await request.json();
 	} catch {
-		return Response.json({ error: "invalid JSON body" }, { status: 400 });
+		return Response.json({ error: tr("请求体不是有效的 JSON", "invalid JSON body") }, { status: 400 });
 	}
 	return Response.json(writeRenderSettings(body));
 }

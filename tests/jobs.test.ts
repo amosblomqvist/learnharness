@@ -259,7 +259,7 @@ describe("job store", () => {
 
 		assert.match(job.id, /^job_/);
 		assert.equal(job.status, "running");
-		assert.equal(job.activity, "starting");
+		assert.equal(job.activity, "启动中");
 
 		const loaded = jobStore.getJob(job.id)!;
 		assert.equal(loaded.toolCallId, "call-store");
@@ -541,7 +541,7 @@ describe("dispatch (async protocol §2)", () => {
 
 		const done = jobStore.getJob(job!.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "finished");
+		assert.equal(done.activity, "已完成");
 
 		// The steer carries the brief on its model-facing content; the
 		// artifact payload rides details for the (UI) renderer.
@@ -618,7 +618,7 @@ describe("research runner (async protocol §3)", () => {
 		// The job is done, with the activity line from the tool call.
 		const done = jobStore.getJob(job.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "finished", "delivery does not own the worker status");
+		assert.equal(done.activity, "已完成", "delivery does not own the worker status");
 		const result = done.result as ResearchResult;
 		assert.equal(result.brief, BRIEF);
 		assert.ok(result.sources.length > 0, "sources parsed from the brief");
@@ -813,7 +813,7 @@ describe("pdf runner (sources v0)", () => {
 
 		const done = jobStore.getJob(job.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "finished");
+		assert.equal(done.activity, "已完成");
 		const result = done.result as PdfResult;
 		assert.equal(result.path, PDF_FIXTURE);
 		assert.match(result.brief, /integral rule/);
@@ -1624,14 +1624,14 @@ describe("abort (src/server/jobs.ts abortJob)", () => {
 		});
 		try {
 			const settled = runner.runJob(jobId, RESEARCH_INPUT);
-			await waitFor(() => jobStore.getJob(jobId)!.activity === "researching", 8000, "loop started");
+			await waitFor(() => jobStore.getJob(jobId)!.activity === "调研中", 8000, "loop started");
 
 			const outcome = abortJob(jobId);
 			assert.ok(outcome.ok);
 			const killed = jobStore.getJob(jobId)!;
 			assert.equal(killed.status, "error", "flipped synchronously — the poll sees it at once");
 			assert.equal(killed.error, "Aborted by learner", "abort reads as an error with a reason, not a failure");
-			assert.equal(killed.activity, "aborted");
+			assert.equal(killed.activity, "已中止");
 
 			await settled; // unwinds — no hang
 			assert.equal(jobStore.getJob(jobId)!.status, "error", "the runner never overwrites the flip");
@@ -1766,7 +1766,7 @@ describe("stale-job recovery sweep (liveness-gated)", () => {
 		resetSweepThrottle();
 		recoverStaleJobs();
 		assert.ok(!respawnedIds.includes(jobId), "a live loop is provably executing — no respawn beside it");
-		assert.equal(jobStore.getJob(jobId)!.activity, "starting", "the record is untouched");
+		assert.equal(jobStore.getJob(jobId)!.activity, "启动中", "the record is untouched");
 		// Hermetic teardown: settle + unregister so later sweeps in THIS suite
 		// never see this fixture as a fresh orphan.
 		jobStore.updateJob(jobId, { status: "done", activity: "settled (test)" });
@@ -1784,7 +1784,7 @@ describe("stale-job recovery sweep (liveness-gated)", () => {
 		resetSweepThrottle();
 		recoverStaleJobs();
 		assert.ok(respawnedIds.includes(jobId), "the orphan's loop is re-spawned at once");
-		assert.equal(jobStore.getJob(jobId)!.activity, "recovering: re-running");
+		assert.equal(jobStore.getJob(jobId)!.activity, "正在恢复：重新运行");
 		// Hermetic teardown (see above) — the respawned loop is the TEST's
 		// fake seam, nothing real runs.
 		jobStore.updateJob(jobId, { status: "done", activity: "settled (test)" });
@@ -1829,7 +1829,7 @@ describe("BYOK job refusal (no factory floor)", () => {
 		// stranded waiting for a result that will never come — and
 		// finalizeJob flips the record to error after the delivery.
 		assert.equal(done.status, "error", "the job lands error, never a phantom run");
-		assert.match(done.error ?? "", /No model configured/);
+		assert.match(done.error ?? "", /^尚未配置模型——请先设置模型/);
 		assert.match(done.error ?? "", /missing: cheap/);
 		assert.equal(delivery.steers.length, 1, "the refusal STEERED — the teacher is not stranded");
 		assert.ok(

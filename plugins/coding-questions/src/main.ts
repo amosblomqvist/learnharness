@@ -5,12 +5,13 @@ import { mountTestResult } from "./result-view.ts";
 import { mountModelSolution } from "./solution-view.ts";
 import { mountSavedQuestion } from "./question-view.ts";
 import { readTestResult, type CodingTestResult } from "./test-result.ts";
+import { tr } from "./i18n.ts";
 
 function mountRecordedTests(container: HTMLElement, ctx: PluginFrontendContext, outcome: { result: unknown } | { error: string }, signal: AbortSignal, headerContainer?: HTMLElement): () => void {
   const result = "result" in outcome ? readTestResult(outcome.result) : null;
   const failure: CodingTestResult = {
     status: "error", exitCode: null, stdout: "", stderr: "", stdoutTruncated: false, stderrTruncated: false,
-    message: "error" in outcome ? outcome.error : "Saved test result is unavailable.",
+    message: "error" in outcome ? outcome.error : tr("已保存的测试结果不可用。", "Saved test result is unavailable."),
   };
   return mountTestResult(container, ctx.ui, result ?? failure, signal, headerContainer);
 }

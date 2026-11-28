@@ -11,6 +11,7 @@ import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
 import { embedLearnerImage, type ArtifactPartProps, type VisualResult } from "@/src/core";
 import { useImageSnapshot } from "./use-image-snapshot";
+import { tr } from "@/src/core";
 
 /**
  * Visual artifact card (W6 → ack protocol): the tool part's output is the
@@ -75,7 +76,7 @@ export function VisualOutputCard({
 	if (!result || typeof result.svg !== "string") {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				Figure completed, but the result could not be displayed.
+				{tr("插图已完成，但无法显示结果。", "Figure completed, but the result could not be displayed.")}
 			</div>
 		);
 	}
@@ -88,14 +89,14 @@ export function VisualOutputCard({
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
 				<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					Figure
-					<span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>
+					{tr("插图", "Figure")}
+					<span className="rounded bg-error/15 px-1.5 py-0.5 text-error">{tr("失败", "failed")}</span>
 				</div>
-				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? "The figure could not be drawn."}</p>
+				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? tr("无法绘制这张插图。", "The figure could not be drawn.")}</p>
 			</div>
 		);
 	}
-	if (result.image && !snapshot.image) return <div className="my-4 text-sm text-muted-foreground" role="status">{snapshot.failed ? "Image snapshot could not be loaded." : "Loading image…"}</div>;
+	if (result.image && !snapshot.image) return <div className="my-4 text-sm text-muted-foreground" role="status">{snapshot.failed ? tr("无法加载图片快照。", "Image snapshot could not be loaded.") : tr("正在加载图片…", "Loading image…")}</div>;
 	return (
 		/* NO CARD CHROME (owner round, 2026-10-07): the figure is document
 		   material — no border, no padding box. Image first, then the CAPTION
@@ -140,7 +141,7 @@ export function VisualOutputCard({
 					? "mt-2 flex w-0 min-w-full flex-wrap items-center justify-between gap-2"
 					: "mt-2 flex items-center justify-between gap-2"
 			}>
-				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
+				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{tr("插图", "Figure")}</div>
 				<div className={!invertible ? "ml-auto flex items-center gap-1.5" : "flex items-center gap-1.5"}>
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
@@ -148,15 +149,16 @@ export function VisualOutputCard({
 						<Toggle
 							checked={inverted}
 							onChange={toggleInverted}
-							label="Invert figure brightness"
-							title="Invert colors"
+							label={tr("反转插图亮度", "Invert figure brightness")}
+							testid="toggle-invert-figure-brightness"
+							title={tr("反转颜色", "Invert colors")}
 							discIcon={<InvertDiscIcon className="size-3" />}
 						/>
 					)}
 					<button
 						type="button"
-						aria-label="Download figure as SVG"
-						title="Download as SVG"
+						aria-label={tr("将插图下载为 SVG", "Download figure as SVG")}
+						title={tr("下载为 SVG", "Download as SVG")}
 						onClick={() => downloadFile("figure.svg", svg, "image/svg+xml")}
 						data-testid="visual-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -166,8 +168,8 @@ export function VisualOutputCard({
 					{overlay && (
 						<button
 							type="button"
-							aria-label="Open figure fullscreen"
-							title="Open fullscreen"
+							aria-label={tr("全屏查看插图", "Open figure fullscreen")}
+							title={tr("全屏查看", "Open fullscreen")}
 							onClick={() => overlay.openFigure(svg, shownInverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

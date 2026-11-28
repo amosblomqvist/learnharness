@@ -75,7 +75,7 @@ test("queued and running standalone tasks are live metadata-only rows; END remov
 	await tick();
 	feed = activityFeed();
 	assert.equal(feed.pluginWorkers[0]?.status, "running");
-	assert.equal(feed.pluginWorkers[0]?.activity, "starting");
+	assert.equal(feed.pluginWorkers[0]?.activity, "启动中");
 	assert.equal(f.lists(), 1, "only initial recovery lists stored tasks, not activity updates");
 	const other = f.start("other");
 	assert.equal(abortPluginWorkerActivity(`panel-fixture:${task.id}`), true);
@@ -249,7 +249,7 @@ test("native row displays standalone metadata, has no session link, and END uses
 		await act(async () => { detail.dispatchEvent(new window.Event("click", { bubbles: true })); });
 		assert.equal(document.querySelector("a[href^='/chat/']"), null);
 		assert.match(document.body.textContent!, /offline-fixture:held/);
-		assert.match(document.body.textContent!, /Context—/);
+		assert.match(document.body.textContent!, /上下文—/);
 		await act(async () => { document.querySelector("[data-testid='activity-abort']")!.dispatchEvent(new window.Event("click", { bubbles: true })); });
 		assert.deepEqual(calls, [{ url: "/api/activity/abort", body: { kind: "plugin-worker", id: `view-fixture:${task.id}` } }]);
 	} finally {

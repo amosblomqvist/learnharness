@@ -4,6 +4,7 @@
  */
 import { parseSideOpenInput, SideChatInputError } from "@/src/core";
 import { sideChats } from "@/src/server";
+import { tr } from "@/src/core";
 
 type Ctx = { params: Promise<{ id: string; threadId: string }> };
 
@@ -17,8 +18,8 @@ export async function PATCH(request: Request, ctx: Ctx): Promise<Response> {
 		throw err;
 	}
 	const result = sideChats.setOpen(id, threadId, open);
-	if (result === "unknown-chat") return Response.json({ error: "Unknown chat" }, { status: 404 });
-	if (result === "unknown-thread") return Response.json({ error: "Unknown side thread" }, { status: 404 });
+	if (result === "unknown-chat") return Response.json({ error: tr("找不到该会话", "Unknown chat") }, { status: 404 });
+	if (result === "unknown-thread") return Response.json({ error: tr("找不到该旁支提问", "Unknown side thread") }, { status: 404 });
 	return Response.json({ thread: result });
 }
 

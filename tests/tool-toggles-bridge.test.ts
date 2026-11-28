@@ -90,10 +90,10 @@ describe("parseAgentSettingsBody: tool keys validate at write time", () => {
 	it("unknown keys are rejected with the supported list (the quiz wedge never persists)", () => {
 		const r = parse({ quiz: false });
 		assert.equal(r.ok, false);
-		assert.match(!r.ok && r.error, /unknown tool "quiz" \(supported: research, demo, visual, pdf, explain\)/);
+		assert.match(!r.ok && r.error, /未知工具“quiz”（支持：research, demo, visual, pdf, explain）/);
 		const typo = parse({ reasearch: false });
 		assert.equal(typo.ok, false);
-		assert.match(!typo.ok && typo.error, /unknown tool "reasearch"/);
+		assert.match(!typo.ok && typo.error, /未知工具“reasearch”/);
 	});
 
 	it("absent tools field is fine (absent = enabled everywhere)", () => {

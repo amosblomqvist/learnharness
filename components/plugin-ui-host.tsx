@@ -18,6 +18,7 @@ import { HostDialog } from "@/components/host-dialog";
 import { findCurrentSurfaceBoundary, requireSurfaceBoundary } from "./plugin-surface-targets";
 import { PluginSurface } from "./plugin-surface-shell";
 import { isInteractionElementVisible, useInteractionLayers, type CloseOutcome, type CloseReason } from "@/components/interaction-layers";
+import { tr } from "@/src/core";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
 export interface PluginUiFactoryOptions { signal: AbortSignal; pluginId?: string; onError?: (error: unknown) => void }
@@ -354,7 +355,7 @@ function PluginDialog({ title, content, onClose, runtime, opener }: PluginDialog
 		<div data-plugin-ui-dialog-scroll="" className="min-h-0 overflow-y-auto p-5">
 			<PluginContent content={content} runtime={runtime} />
 		</div>
-		<button type="button" aria-label="Close dialog" title="Close" onClick={close}
+		<button type="button" aria-label={tr("关闭对话框", "Close dialog")} title={tr("关闭", "Close")} onClick={close}
 			className="absolute right-2 top-2 z-10 size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 			<svg viewBox="0 0 16 16" className="mx-auto size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
 				<path d="M4 4l8 8M12 4l-8 8" />

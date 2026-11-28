@@ -171,7 +171,7 @@ async function settle(page) {
 async function measureLabels(page, scope) {
 	return page.evaluate((scopeSel) => {
 		const rows = [];
-		document.querySelectorAll(`${scopeSel} svg[aria-label="Plan diagram"]`).forEach((svg, diagram) => {
+		document.querySelectorAll(`${scopeSel} svg[aria-label="学习计划图"]`).forEach((svg, diagram) => {
 			for (const g of svg.querySelectorAll("[data-testid^=plan-node-]")) {
 				const rect = g.querySelector("rect");
 				const W = Number(rect.getAttribute("width"));
@@ -247,7 +247,7 @@ async function setFont(page, stack, size) {
 			// the new metrics before we compare the labels with their boxes.
 			rule.textContent = z ? `
 				[data-older-transcript-row]:has([data-testid="plan-block-full"]) { content-visibility: visible; }
-				:is(svg[aria-label="Plan diagram"], svg[data-plan-probe]) .text-xs { font-size: ${z} !important; }
+				:is(svg[aria-label="学习计划图"], svg[data-plan-probe]) .text-xs { font-size: ${z} !important; }
 			` : "";
 		},
 		stack,
@@ -269,7 +269,7 @@ async function pickReadingFont(page, family) {
 	await page.keyboard.press("Enter");
 	await saved;
 	await page.keyboard.press("Escape");
-	await page.waitForFunction((f) => getComputedStyle(document.querySelector('[data-testid=plan-block-full] svg[aria-label="Plan diagram"]')).fontFamily.includes(f), {}, family);
+	await page.waitForFunction((f) => getComputedStyle(document.querySelector('[data-testid=plan-block-full] svg[aria-label="学习计划图"]')).fontFamily.includes(f), {}, family);
 	await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
@@ -311,7 +311,7 @@ async function installRegressionFonts(page) {
 
 async function planSnapshot(page) {
 	return page.$eval("[data-testid=plan-block-full]", (block) => {
-		const svg = block.querySelector(':scope > svg[aria-label="Plan diagram"]');
+		const svg = block.querySelector(':scope > svg[aria-label="学习计划图"]');
 		const sample = block.querySelector(":scope > svg[data-plan-probe] > text:first-of-type").getBBox();
 		return {
 			sentinel: [sample.width, sample.height],
@@ -402,10 +402,10 @@ async function shoot(page, selector, file) {
  *  own fetch), and box widths hold still for three polls in a row. */
 async function openChat(page, origin, id, font) {
 	await page.goto(`${origin}/chat/${id}`, { waitUntil: "load", timeout: 120_000 });
-	await page.waitForSelector('[data-testid=plan-block-full] svg[aria-label="Plan diagram"]', { timeout: 60_000 });
+	await page.waitForSelector('[data-testid=plan-block-full] svg[aria-label="学习计划图"]', { timeout: 60_000 });
 	await page.waitForFunction(
 		(fontPattern) => {
-			const svg = document.querySelector("[data-testid=plan-block-full] svg[aria-label='Plan diagram']");
+			const svg = document.querySelector("[data-testid=plan-block-full] svg[aria-label='学习计划图']");
 			const hydrated = svg && Object.keys(svg).some((k) => k.startsWith("__reactFiber"));
 			return hydrated && (!fontPattern || new RegExp(fontPattern).test(getComputedStyle(svg).fontFamily));
 		},
@@ -460,7 +460,7 @@ async function main() {
 		// 2. Popup (the live plan) on the hard titles, default + mono + big.
 		await openChat(page, origin, HARD_CHAT);
 		await page.click("[data-testid=plan-chip]");
-		await page.waitForSelector("[data-testid=plan-popup] svg[aria-label='Plan diagram']");
+		await page.waitForSelector("[data-testid=plan-popup] svg[aria-label='学习计划图']");
 		for (const [name, stack, size] of [["default", null, null], ["JetBrains Mono", FONTS[1][1], null], ["JetBrains Mono", FONTS[1][1], "24px"]]) {
 			await setFont(page, stack, size);
 			check(`popup · hard titles · ${name} · ${size ?? "11px"}`, await measureLabels(page, "[data-testid=plan-popup]"), size);
@@ -471,7 +471,7 @@ async function main() {
 
 		// 2b. Dock band marginalia beside a pending question.
 		await openChat(page, origin, PENDING_CHAT);
-		await page.waitForSelector("[data-testid=plan-marginalia] svg[aria-label='Plan diagram']", { visible: true, timeout: 30_000 });
+		await page.waitForSelector("[data-testid=plan-marginalia] svg[aria-label='学习计划图']", { visible: true, timeout: 30_000 });
 		for (const [name, stack, size] of [["default", null, null], ["JetBrains Mono", FONTS[1][1], null], ["JetBrains Mono", FONTS[1][1], "16px"]]) {
 			await setFont(page, stack, size);
 			check(`dock marginalia · hard titles · ${name} · ${size ?? "11px"}`, await measureLabels(page, "[data-testid=plan-marginalia]"), size);

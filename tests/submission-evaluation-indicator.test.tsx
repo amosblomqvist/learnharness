@@ -126,7 +126,7 @@ test("ordinary text submission keeps the existing Thinking placeholder", async (
 for (const evaluating of [true, false]) test(`pending indicator renders one unchanged spinner with ${evaluating ? "Evaluating" : "Thinking"} visible and accessible labels`, () => {
 	const html = renderToStaticMarkup(<PendingTurnIndicator evaluating={evaluating} />);
 	assert.equal((html.match(/data-testid="braille-spinner"/g) ?? []).length, 1);
-	assert.match(html, new RegExp(`aria-label="${evaluating ? "Evaluating" : "Thinking"}"`));
-	assert.ok(html.includes(evaluating ? "EVALUATING…" : "THINKING…"));
-	assert.ok(!html.includes(evaluating ? "THINKING…" : "EVALUATING…"));
+	assert.match(html, new RegExp(`aria-label="${evaluating ? "评估中" : "思考中"}"`));
+	assert.ok(html.includes(evaluating ? "评估中…" : "思考中…"));
+	assert.ok(!html.includes(evaluating ? "思考中…" : "评估中…"));
 });

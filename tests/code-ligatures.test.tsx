@@ -33,7 +33,7 @@ it("invalid writes are rejected; invalid historical disk values are dropped, nev
   for (const value of [null, "true", "false", 0, 1, [], {}]) {
     const parsed = parseAppearanceSettingsBody({ codeLigatures: value });
     assert.equal(parsed.ok, false, JSON.stringify(value));
-    if (!parsed.ok) assert.equal(parsed.error, "codeLigatures must be a boolean");
+    if (!parsed.ok) assert.equal(parsed.error, "codeLigatures 必须是布尔值");
     const record = sanitizeUserSettings({ version: 1, appearance: { codeLigatures: value, proseFontSize: 20 } });
     assert.deepEqual(record?.appearance, { proseFontSize: 20 });
     assert.equal(resolveSettings(record).appearance.codeLigatures, false);
@@ -84,7 +84,7 @@ it("the Appearance switch preserves siblings, applies immediately through the pr
     const { delta, onAppearanceChange } = useAppearance();
     return <AppearanceSection appearance={delta} onSectionChange={next => { writes.push(next); onAppearanceChange(next); return true; }} />;
   }
-  const toggle = () => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Code ligatures"]')!;
+  const toggle = () => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="代码连字"]')!;
   const token = () => document.documentElement.style.getPropertyValue("--lh-code-ligatures");
   try {
     await act(async () => root.render(<InteractionLayersProvider><AppearanceProvider initialAppearance={{ proseFontSize: 20, fontFamily: "Georgia" }} initialTheme={DEFAULT_THEME}><Panel /></AppearanceProvider></InteractionLayersProvider>));

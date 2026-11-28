@@ -9,6 +9,7 @@ import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
 import { sideChats } from "./side-chat.ts";
+import { tr } from "../core/i18n.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -75,7 +76,7 @@ export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, {
 			ok: false,
 			status: 409,
 			code: "turn_in_flight",
-			error: "A turn is running in this session — try again when it finishes",
+			error: tr("该会话有回合正在进行——请在其结束后重试", "A turn is running in this session — try again when it finishes"),
 			jobIds: [],
 		};
 	}
@@ -89,7 +90,7 @@ export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, {
 			ok: false,
 			status: 409,
 			code: "jobs_running",
-			error: "Background jobs are still running in this session — try again when they finish",
+			error: tr("该会话仍有后台任务在运行——请在其结束后重试", "Background jobs are still running in this session — try again when they finish"),
 			jobIds: runningJobs.map((job) => job.id),
 		};
 	}
@@ -98,7 +99,7 @@ export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, {
 
 export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
 	if (!stores.chatStore.getChat(chatId)) {
-		return { ok: false, status: 404, code: "not_found", error: "No such session" };
+		return { ok: false, status: 404, code: "not_found", error: tr("会话不存在", "No such session") };
 	}
 	const blocker = runningWorkBlocker(chatId);
 	if (blocker) return blocker;
@@ -111,7 +112,7 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 					ok: false,
 					status: 503,
 					code: "extraction_winding_down",
-					error: "The session's extraction is still winding down — try again in a moment",
+					error: tr("该会话的提取仍在收尾——请稍后重试", "The session's extraction is still winding down — try again in a moment"),
 				};
 			}
 			await new Promise((resolve) => setTimeout(resolve, WIND_DOWN_POLL_MS));
@@ -143,7 +144,7 @@ export async function settleChatsForDeletion(chatIds: readonly string[]):
 	const deadline = Date.now() + WIND_DOWN_TIMEOUT_MS;
 	for (let chatId = winding(); chatId !== undefined; chatId = winding()) {
 		if (Date.now() > deadline) {
-			return { chatId, failure: { ok: false, status: 503, code: "extraction_winding_down", error: "The session's extraction is still winding down — try again in a moment" } };
+			return { chatId, failure: { ok: false, status: 503, code: "extraction_winding_down", error: tr("该会话的提取仍在收尾——请稍后重试", "The session's extraction is still winding down — try again in a moment") } };
 		}
 		await new Promise((resolve) => setTimeout(resolve, WIND_DOWN_POLL_MS));
 	}
@@ -153,14 +154,14 @@ export async function settleChatsForDeletion(chatIds: readonly string[]):
 /** Source deletion has already purged the selected batch's graph traces.
  * Remove the remaining session data with the same gates/cleanup and no await. */
 export function deleteIdleChatRecord(chatId: string): Extract<ChatDeleteOutcome, { ok: false }> | { ok: true } {
-	if (!stores.chatStore.getChat(chatId)) return { ok: false, status: 404, code: "not_found", error: "No such session" };
+	if (!stores.chatStore.getChat(chatId)) return { ok: false, status: 404, code: "not_found", error: tr("会话不存在", "No such session") };
 	const blocker = runningWorkBlocker(chatId);
 	if (blocker) return blocker;
-	if (extractionStatuses().some((run) => run.chatId === chatId)) return { ok: false, status: 503, code: "extraction_winding_down", error: "The session's extraction is still winding down — try again in a moment" };
+	if (extractionStatuses().some((run) => run.chatId === chatId)) return { ok: false, status: 503, code: "extraction_winding_down", error: tr("该会话的提取仍在收尾——请稍后重试", "The session's extraction is still winding down — try again in a moment") };
 	finishChatRecordDeletion(chatId);
 	// ChatStore can swallow unlink failures. Do not tell source deletion to
 	// discard placement/folders while the conversation still exists.
-	if (stores.chatStore.getChat(chatId)) throw new Error("Could not remove the selected session record.");
+	if (stores.chatStore.getChat(chatId)) throw new Error(tr("无法删除所选会话的记录。", "Could not remove the selected session record."));
 	return { ok: true };
 }
 

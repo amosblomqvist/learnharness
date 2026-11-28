@@ -258,7 +258,7 @@ it("worker/compaction adapters acknowledge invalid, accepted and unset outcomes"
 	Object.defineProperty(input, "validity", { value: { badInput: false } });
 	await f.type(input, "1.5"); await f.key(input, "Escape");
 	assert.equal(agent.length, 0); assert.equal(input.value, "1.5");
-	assert.ok(document.querySelector('[role="alert"]')?.textContent?.includes("positive, safely representable whole number"));
+	assert.ok(document.querySelector('[role="alert"]')?.textContent?.includes("请输入一个可安全表示的正整数。"));
 	await f.type(input, "9"); await f.blur(input); assert.equal(agent.at(-1)?.workerRequestConcurrency, 9);
 	await f.type(input, ""); await f.blur(input); assert.equal(agent.at(-1)?.workerRequestConcurrency, undefined);
 	input = f.input('[data-testid="input-compaction-threshold"]');
@@ -285,7 +285,7 @@ for (const failure of ["http", "network", "missing", "malformed"] as const) {
 		await f.type(input, "#ABCDEF"); await f.key(input, "Escape");
 		assert.equal(closed, 0); assert.equal(input.value, "#ABCDEF"); assert.equal(writes, 1);
 		const text = document.querySelector('[data-testid="settings-dialog"]')?.textContent;
-		assert.ok(text?.includes(failure === "http" ? "appearance: Invalid color" : failure === "network" ? "appearance: Network unavailable" : "appearance: Could not confirm saved settings. Your input has been kept."));
+		assert.ok(text?.includes(failure === "http" ? "外观：Invalid color" : failure === "network" ? "外观：Network unavailable" : "外观：无法确认设置已保存。你的输入已保留。"));
 		accept = true; input.focus(); await f.blur(input);
 		assert.equal(writes, 2); assert.equal(input.value, "#abcdef");
 		await f.key(document.body, "Escape"); assert.equal(closed, 1);
@@ -323,7 +323,7 @@ it("plugin validation and callback failures retain drafts; successful callbacks 
 	assert.equal(input.value, "stored", "void callback completion does not assign optimistic plugin state");
 	const number = f.input('[data-plugin-setting="number"] input');
 	await f.type(number, "6"); await f.blur(number);
-	assert.equal(number.value, "6"); assert.ok(document.body.textContent?.includes("Value is outside the allowed range."));
+	assert.equal(number.value, "6"); assert.ok(document.body.textContent?.includes("数值超出允许范围。"));
 	await f.type(number, ""); await f.blur(number); assert.equal(number.value, "");
 	await f.type(number, "4"); await f.blur(number); assert.equal(number.value, "3");
 	assert.deepEqual(changes, ["candidate", "candidate", 4]);

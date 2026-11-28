@@ -22,6 +22,7 @@ import { effectiveSettings, stores } from "./stores.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { refreshConnectionCatalog } from "./model-catalog.ts";
 import { awaitCompaction } from "./compaction.ts";
+import { tr } from "../core/i18n.ts";
 
 export type SideStreamEvent =
 	| { type: "thread"; thread: SideChatThread }
@@ -100,7 +101,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				void run.settled.then(() => {
 					if (closed) return;
 					const latest = deps.chatStore.getChat(chatId)?.sideChats?.find((entry) => entry.id === thread.id);
-					write(latest ? { type: "done", thread: latest } : { type: "error", error: "The session is gone." });
+					write(latest ? { type: "done", thread: latest } : { type: "error", error: tr("该会话已不存在。", "The session is gone.") });
 					run.listeners.delete(listener);
 					close();
 				});
@@ -112,41 +113,41 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 
 	function watch(chatId: string, threadId: string): Response {
 		const record = deps.chatStore.getChat(chatId);
-		if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
+		if (!record) return Response.json({ error: tr("未知会话", "Unknown chat") }, { status: 404 });
 		const thread = record.sideChats?.find((entry) => entry.id === threadId);
-		return thread ? responseFor(chatId, thread, runs.get(runKey(chatId, threadId))) : Response.json({ error: "Unknown side conversation" }, { status: 404 });
+		return thread ? responseFor(chatId, thread, runs.get(runKey(chatId, threadId))) : Response.json({ error: tr("未知的旁支提问", "Unknown side conversation") }, { status: 404 });
 	}
 
 	async function ask(chatId: string, input: SideAskInput): Promise<Response> {
 		await deps.beforeAsk?.(chatId);
 		const initial = deps.chatStore.getChat(chatId);
-		if (!initial) return Response.json({ error: "Unknown chat" }, { status: 404 });
+		if (!initial) return Response.json({ error: tr("未知会话", "Unknown chat") }, { status: 404 });
 		const engine = await deps.engineFor(initial);
 		if (engine instanceof Response) return engine;
 		// No awaits between reading, deduplicating, saving and registration.
 		const record = deps.chatStore.getChat(chatId);
-		if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
+		if (!record) return Response.json({ error: tr("未知会话", "Unknown chat") }, { status: 404 });
 		const threads = record.sideChats ?? [];
 		let target = input.threadId ? threads.find((thread) => thread.id === input.threadId) : undefined;
-		if (input.threadId && !target) return Response.json({ error: "Unknown side conversation" }, { status: 404 });
+		if (input.threadId && !target) return Response.json({ error: tr("未知的旁支提问", "Unknown side conversation") }, { status: 404 });
 		if (!target && input.anchor) {
 			const segment = sideSegmentId(record.messages, input.anchor.messageId);
-			if (!segment) return Response.json({ error: "The source is not a teaching segment in this session" }, { status: 400 });
+			if (!segment) return Response.json({ error: tr("该来源不是此会话中的教学段落", "The source is not a teaching segment in this session") }, { status: 400 });
 			target = threads.find((thread) => thread.anchor.messageId === segment) ?? newSideThread({
 				...input.anchor, messageId: segment, partId: `${segment}-t0`, blockIndex: 0,
 				// The client chooses a segment, not what the tutor allegedly said.
 				blockText: userFacingTextOf(record.messages.find((message) => message.id === segment && message.role === "assistant")?.content ?? [], failedOutputCallIds(record.messages)).join("\n\n").slice(0, 4_000) || "This teaching segment and its associated question.",
 			});
 		}
-		if (!target) return Response.json({ error: "A teaching segment or threadId is required" }, { status: 400 });
+		if (!target) return Response.json({ error: tr("需要提供教学段落或 threadId", "A teaching segment or threadId is required") }, { status: 400 });
 		if (input.quoteCitations) {
-			if (input.quoteCitations.length !== input.quotes.length) return Response.json({ error: "Quote sources do not match the passages" }, { status: 400 });
+			if (input.quoteCitations.length !== input.quotes.length) return Response.json({ error: tr("引用来源与引文段落不匹配", "Quote sources do not match the passages") }, { status: 400 });
 			for (const [index, link] of input.quoteCitations.entries()) {
 				const citations = collectCitations(link);
 				const citation = citations[0]?.citation;
 				const source = citation && record.messages.find((message) => message.id === citation.messageId && message.role === "assistant");
 				if (citations.length !== 1 || citations[0]!.source !== link || !citation || citation.chatId !== chatId || citation.text.trim() !== input.quotes[index] || !source || sideSegmentId(record.messages, source.id) !== target.anchor.messageId) {
-					return Response.json({ error: "The quoted source is not in this teaching segment" }, { status: 400 });
+					return Response.json({ error: tr("引用的来源不在此教学段落中", "The quoted source is not in this teaching segment") }, { status: 400 });
 				}
 			}
 		}
@@ -155,7 +156,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 		if (input.requestId && (active?.operationId === input.requestId || target.messages.some((message) => message.id === input.requestId || message.requestId === input.requestId))) {
 			return responseFor(chatId, target, active);
 		}
-		if (active) return Response.json({ error: "This side conversation is still being answered" }, { status: 409 });
+		if (active) return Response.json({ error: tr("此旁支提问仍在回答中", "This side conversation is still being answered") }, { status: 409 });
 
 		let thread = target;
 		let modelThread = target;
@@ -164,7 +165,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			if (last?.role === "assistant" && last.error !== undefined) {
 				// Keep failed evidence in durable/UI history; omit only from this retry request.
 				modelThread = { ...target, messages: target.messages.slice(0, target.messages.findLastIndex((message) => message.role === "user") + 1) };
-			} else if (!sideThreadAwaitsAnswer(target)) return Response.json({ error: "Nothing to retry" }, { status: 409 });
+			} else if (!sideThreadAwaitsAnswer(target)) return Response.json({ error: tr("没有可重试的内容", "Nothing to retry") }, { status: 409 });
 		} else {
 			const question = newSideQuestion(input.text, input.quotes);
 			if (input.quoteCitations?.length) question.quoteCitations = [...input.quoteCitations];
@@ -178,11 +179,11 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 		const instructions = deps.instructions();
 		const estimatedTokens = Math.ceil((instructions.length + turns.reduce((sum, turn) => sum + turn.text.length, 0)) / 4);
 		if (engine.model.contextWindow > 0 && estimatedTokens > Math.max(1, engine.model.contextWindow - Math.min(COMPACTION_RESERVE_TOKENS, engine.model.maxTokens))) {
-			return Response.json({ error: "This side conversation and lesson exceed the selected model's context window. Select a model with a larger context window." }, { status: 400 });
+			return Response.json({ error: tr("此旁支提问与课程内容超出了所选模型的上下文窗口。请选择上下文窗口更大的模型。", "This side conversation and lesson exceed the selected model's context window. Select a model with a larger context window.") }, { status: 400 });
 		}
 		const stored = deps.chatStore.updateSideChats(chatId, (current) => current.some((entry) => entry.id === thread.id)
 			? current.map((entry) => entry.id === thread.id ? thread : entry) : [...current, thread]);
-		if (!stored) return Response.json({ error: "Unknown chat" }, { status: 404 });
+		if (!stored) return Response.json({ error: tr("未知会话", "Unknown chat") }, { status: 404 });
 		const run: SideRun = {
 			controller: new AbortController(), text: "", answerId: newMessageId(), updatedAt: new Date().toISOString(),
 			model: `${engine.model.provider}:${engine.model.id}`, operationId: input.requestId,
@@ -203,7 +204,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				const answer: SideChatMessage = {
 					id: run.answerId, role: "assistant", text: result.text, at, model: run.model, requestId: input.requestId,
 					...(result.outcome === "aborted" ? { stopped: true } : {}),
-					...(result.outcome === "error" ? { error: result.errorMessage ?? "The model call failed." } : {}),
+					...(result.outcome === "error" ? { error: result.errorMessage ?? tr("模型调用失败。", "The model call failed.") } : {}),
 				};
 				deps.chatStore.updateSideChats(chatId, (current) => current.map((entry) => {
 					if (entry.id !== thread.id) return entry;
@@ -221,7 +222,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				}
 			} catch (error) {
 				console.error(`[chat ${chatId}] side answer failed to save:`, error);
-				broadcast({ type: "error", error: "The side answer could not be saved." });
+				broadcast({ type: "error", error: tr("无法保存旁支回答。", "The side answer could not be saved.") });
 			} finally {
 				runs.delete(key);
 				announce(chatId);
@@ -274,7 +275,7 @@ async function productionEngineFor(record: ChatRecord): Promise<SideEngine | Res
 		const engine = piEngineForSpec(spec, false, { captured() {}, beforeDispatch() {}, noDispatch() { denied = true; } },
 			() => stores.settingsStore.readSettings()?.models?.strong?.cacheRetention);
 		return { ...engine, sideUsageAdmitted: () => !denied };
-	} catch { return Response.json({ error: "The selected model is unavailable." }, { status: 503 }); }
+	} catch { return Response.json({ error: tr("所选模型不可用。", "The selected model is unavailable.") }, { status: 503 }); }
 }
 interface SideChatGlobal { __lhSideChatService?: SideChatService }
 export const sideChats: SideChatService = ((globalThis as typeof globalThis & SideChatGlobal).__lhSideChatService ??= createSideChatService({

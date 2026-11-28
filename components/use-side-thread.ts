@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { serializeCitation, sideSegmentId, type LhMessage, type TextSelector, type SideChatMessage, type SideChatThread } from "@/src/core";
 import { useServerEvent, useServerResync } from "./server-events";
+import { tr } from "@/src/core";
 
 export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
 export interface SidePassage { text: string; sourceMessageId: string; selector?: Omit<TextSelector, "text"> }
@@ -111,10 +112,10 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		if (token !== connection.current?.token) { await response.body?.cancel(); return; }
 		if (!response.ok) {
 			const body = await response.json().catch(() => null) as { error?: string | { message?: string } } | null;
-			throw new Error(typeof body?.error === "string" ? body.error : body?.error?.message ?? "The side conversation could not be reached.");
+			throw new Error(typeof body?.error === "string" ? body.error : body?.error?.message ?? tr("无法连接旁支提问。", "The side conversation could not be reached."));
 		}
 		const reader = response.body?.getReader();
-		if (!reader) throw new Error("The side answer had no response stream.");
+		if (!reader) throw new Error(tr("旁支提问的回答没有返回响应流。", "The side answer had no response stream."));
 		const decoder = new TextDecoder(); let buffer = ""; let terminal = false;
 		const apply = (line: string) => {
 			if (!line.trim() || token !== connection.current?.token) return;
@@ -128,7 +129,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 				revision.current++; // an older GET must not rewind a newer stream tail
 				dispatch({ type: "text", threadId, text: event.text ?? "" });
 			}
-			else if (event.type === "error") throw new Error(event.error ?? "The side answer failed.");
+			else if (event.type === "error") throw new Error(event.error ?? tr("旁支提问的回答失败。", "The side answer failed."));
 		};
 		try {
 			for (;;) {
@@ -138,7 +139,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 				let newline: number;
 				while ((newline = buffer.indexOf("\n")) >= 0) { apply(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1); }
 			}
-			if (!terminal && token === connection.current?.token) throw new Error("The side answer disconnected. Reopen the conversation to reconnect.");
+			if (!terminal && token === connection.current?.token) throw new Error(tr("旁支提问的回答已断开。请重新打开该旁支提问以重新连接。", "The side answer disconnected. Reopen the conversation to reconnect."));
 		} finally { reader.releaseLock(); }
 	}, [adopt]);
 

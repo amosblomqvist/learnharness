@@ -6,6 +6,7 @@ import type { CloseOutcome } from "@/components/interaction-layers";
 import { Button } from "@/components/ui/button";
 import { PromptText } from "./prompt-text";
 import { SettingsSegmentedControl } from "./controls";
+import { tr } from "@/src/core";
 
 export type PromptSaveOutcome = "saved" | "save-failed" | "activation-failed";
 export type PromptDeleteOutcome = "deleted" | "delete-failed" | "settings-busy";
@@ -35,7 +36,7 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 	const field = useRef<HTMLTextAreaElement>(null);
 	const titleId = useId(), nameId = useId();
 	const dirty = editing && text !== (savedText ?? source);
-	const title = !editing ? "View default" : savedText === null ? "Add override" : "Edit override";
+	const title = !editing ? tr("查看默认", "View default") : savedText === null ? tr("添加覆盖", "Add override") : tr("编辑覆盖", "Edit override");
 
 	useLayoutEffect(() => {
 		if (confirmDiscard) keepEditing.current?.focus();
@@ -75,8 +76,8 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 			else if (result === "activation-failed") {
 				setSavedText(text);
 				setActivationFailed(true);
-				setError("Override saved, but it couldn't be put in use. Retry activation below.");
-			} else setError("Couldn't save the override. Your edits are still here.");
+				setError(tr("覆盖已保存，但未能启用。请在下方重试启用。", "Override saved, but it couldn't be put in use. Retry activation below."));
+			} else setError(tr("无法保存覆盖。你的修改仍保留在这里。", "Couldn't save the override. Your edits are still here."));
 		} finally {
 			pending.current = false;
 			setBusy(null);
@@ -91,8 +92,8 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 		try {
 			const result = await onDelete();
 			if (result === "deleted") onClose();
-			else if (result === "settings-busy") setError("Settings is still saving. Try deleting the override again after the save finishes.");
-			else setError("Couldn't delete the override.");
+			else if (result === "settings-busy") setError(tr("设置仍在保存中。请在保存完成后再次尝试删除覆盖。", "Settings is still saving. Try deleting the override again after the save finishes."));
+			else setError(tr("无法删除覆盖。", "Couldn't delete the override."));
 		} finally {
 			pending.current = false;
 			setBusy(null);
@@ -107,8 +108,8 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 				<h2 id={titleId} className="text-sm font-semibold">{title}</h2>
 				<p id={nameId} className="mt-0.5 font-prose text-(length:--lh-prose-size) text-muted-foreground">{name}</p>
 			</div>
-			<SettingsSegmentedControl label="Prompt display" disabled={confirmDiscard}
-				options={[{ value: "markdown", label: "Markdown" }, { value: "preview", label: "Preview" }]}
+			<SettingsSegmentedControl label={tr("提示词显示方式", "Prompt display")} disabled={confirmDiscard}
+				options={[{ value: "markdown", label: "Markdown" }, { value: "preview", label: tr("预览", "Preview") }]}
 				value={preview ? "preview" : "markdown"} onChange={next => setPreview(next === "preview")} />
 		</header>
 		<div className="flex min-h-0 flex-1 flex-col px-4 pt-4" inert={confirmDiscard}>
@@ -117,17 +118,17 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 		<footer className="flex shrink-0 flex-col gap-2 px-4 py-3">
 			{error && <p role="alert" className="text-xs text-error">{error}</p>}
 			{confirmDiscard ? <div className="flex flex-wrap items-center justify-between gap-2">
-				<p role="status" className="text-xs">Discard unsaved changes?</p>
+				<p role="status" className="text-xs">{tr("放弃未保存的更改？", "Discard unsaved changes?")}</p>
 				<div className="ml-auto flex gap-2">
-					<Button ref={keepEditing} type="button" variant="outline" size="sm" onClick={resumeEditing}>Keep editing</Button>
-					<Button type="button" variant="destructive" size="sm" onClick={onClose}>Discard changes</Button>
+					<Button ref={keepEditing} type="button" variant="outline" size="sm" onClick={resumeEditing}>{tr("继续编辑", "Keep editing")}</Button>
+					<Button type="button" variant="destructive" size="sm" onClick={onClose}>{tr("放弃更改", "Discard changes")}</Button>
 				</div>
 			</div> : <div className="flex flex-wrap items-center justify-between gap-2">
-				{editing && savedText !== null && <button type="button" className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-40" disabled={busy !== null || dirty} onClick={() => void remove()}>{busy === "delete" ? "Deleting…" : "Delete override"}</button>}
+				{editing && savedText !== null && <button type="button" className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-40" disabled={busy !== null || dirty} onClick={() => void remove()}>{busy === "delete" ? tr("删除中…", "Deleting…") : tr("删除覆盖", "Delete override")}</button>}
 				<div className="ml-auto flex gap-2">
-					<Button ref={closeButton} type="button" variant="ghost" size="sm" disabled={busy !== null} onClick={requestClose}>Close</Button>
+					<Button ref={closeButton} type="button" variant="ghost" size="sm" disabled={busy !== null} onClick={requestClose}>{tr("关闭", "Close")}</Button>
 					{editing && <Button type="button" size="sm" disabled={busy !== null || (!dirty && !activationFailed)} onClick={() => void save()}>
-						{busy === "save" ? "Saving…" : activationFailed && !dirty ? "Retry activation" : "Save and activate"}
+						{busy === "save" ? tr("保存中…", "Saving…") : activationFailed && !dirty ? tr("重试启用", "Retry activation") : tr("保存并启用", "Save and activate")}
 					</Button>}
 				</div>
 			</div>}

@@ -27,6 +27,7 @@ import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import { PluginQuestionLedger, type NativePluginQuestionContribution } from "./plugin-question-tools.ts";
+import { VOICE_LANGUAGE_RULE, withOutputLanguage } from "./output-language.ts";
 
 /**
  * The two teaching-side agents (docs/archive/probe-teach-split.md): the PROBER and
@@ -86,11 +87,11 @@ export const CONVERSATION_TOOL_NAMES = Object.freeze([
  *  chat/job machinery. */
 export function composeInstructions(kind: AgentKind, switches?: Record<string, boolean>): string {
 	const segments = effectivePromptSegments(kind, switches ?? {});
-	return segments
+	return withOutputLanguage(segments
 		.map((s) => (s.enabled ? s.overrideText! : s.sourceText))
 		.map((t) => t.trim())
 		.filter(Boolean)
-		.join("\n\n---\n\n");
+		.join("\n\n---\n\n"), VOICE_LANGUAGE_RULE);
 }
 
 // The switch-free source composition, cached per kind (module-load once).

@@ -149,7 +149,7 @@ describe("collapsed question inline preview", () => {
 			assert.equal(document.querySelectorAll("a, [data-testid=md-copy], pre").length, 0);
 			assert.ok(document.body.textContent.includes("the docs"));
 			assert.ok(!document.body.textContent.includes("BLOCK"));
-			assert.ok(document.body.textContent.includes(variant === "reveal" ? "Open" : "Answer"));
+			assert.ok(document.body.textContent.includes(variant === "reveal" ? "打开" : "作答"));
 		}
 	});
 
@@ -322,8 +322,8 @@ describe("probe conclusion Markdown", () => {
 			for (const css of ["my-3", "overflow-hidden", "rounded-xl", "border", "bg-card/60"]) assert.ok(card.classList.contains(css));
 			assert.ok(!card.classList.contains("bg-background/60"), "keep the original card color, not the page background");
 			const summary = card.querySelector("summary")!;
-			assert.match(summary.textContent, /Probe assessment/);
-			assert.ok(summary.textContent.includes(`${count} strand${count === 1 ? "" : "s"}`));
+			assert.match(summary.textContent, /摸底评估/);
+			assert.ok(summary.textContent.includes(`${count} 个方面`));
 			assert.ok(!summary.textContent.includes("·") && !summary.textContent.includes("BODY"));
 			assert.ok(summary.classList.contains("hover:bg-accent/40"));
 			assert.ok(summary.querySelector(".lucide-clipboard-check")?.classList.contains("text-primary"));
@@ -375,7 +375,7 @@ describe("probe conclusion Markdown", () => {
 			} }, output: { ok: true } }} />));
 			assert.equal(host.querySelector("details"), card);
 			assert.ok(card.hasAttribute("open"));
-			assert.ok(card.querySelector("summary")?.textContent.includes("2 strands"));
+			assert.ok(card.querySelector("summary")?.textContent.includes("2 个方面"));
 			assert.ok(card.textContent.includes("Second assessment"));
 			await act(async () => root.render(<ProbeDoneCard key="new-mount" part={{ state: "output-available", input, output: { ok: true } }} />));
 			assert.ok(!host.querySelector("details")!.hasAttribute("open"));

@@ -106,7 +106,7 @@ describe("genericProviderKeyGuard (model-provider keys — paste hygiene only)",
 	it("rejects truncations and whitespace — the only guards", () => {
 		const short = genericProviderKeyGuard("ZAI_API_KEY", "short");
 		assert.ok(!short.ok);
-		if (!short.ok) assert.match(short.error, /at least 12/);
+		if (!short.ok) assert.match(short.error, /至少需要 12 个字符/);
 		assert.ok(!genericProviderKeyGuard("OPENAI_API_KEY", "has whitespace now").ok);
 		assert.ok(!genericProviderKeyGuard("OPENAI_API_KEY", "   ").ok);
 	});

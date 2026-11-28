@@ -96,7 +96,7 @@ describe("session text fields keep keystrokes local", () => {
 		assert.equal(readPathInput(editor), "dictated phrase");
 		assert.equal(latest, "dictated phrase");
 		assert.equal(parentRenders, 1, "typing only renders the local composer subtree");
-		assert.equal(host.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled, false);
+		assert.equal(host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')?.disabled, false);
 
 		await act(async () => { reset("restored draft"); });
 		assert.equal(readPathInput(editor), "restored draft", "explicit external resets still reach PathInput");
@@ -172,7 +172,7 @@ describe("session text fields keep keystrokes local", () => {
 		await act(async () => { host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); });
 		assert.deepEqual(sent, ["typed dictated"]);
 		assert.equal(readPathInput(editor), "");
-		assert.equal(host.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.disabled, true);
+		assert.equal(host.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.disabled, true);
 
 		// The seed is already empty; a new explicit reset must still clear local edits.
 		await typeText(editor, "unsent");
@@ -202,23 +202,23 @@ describe("session text fields keep keystrokes local", () => {
 		}
 		const host = await mount(<Parent />);
 		const submit = async () => { await act(async () => { host.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); }); };
-		assert.ok(host.querySelector('[aria-label="Next problem"]'));
+		assert.ok(host.querySelector('[aria-label="下一题"]'));
 		await submit();
 		assert.equal(nexts, 1);
 		await act(async () => { update({ dictationActive: true }); });
-		assert.equal(host.querySelector<HTMLButtonElement>('[aria-label="Send"]')!.disabled, false);
+		assert.equal(host.querySelector<HTMLButtonElement>('[aria-label="发送"]')!.disabled, false);
 		await submit();
 		assert.equal(sends, 1, "empty input still allows finish-first dictation send");
 		await act(async () => { update({ busy: true, dictationActive: false, nextProblem: false }); });
-		assert.ok(host.querySelector('[aria-label="Stop"]'));
+		assert.ok(host.querySelector('[aria-label="停止"]'));
 		await submit();
 		assert.equal(stops, 1);
 		await typeText(editorIn(host), "steer now");
-		assert.ok(host.querySelector('[aria-label="Send"]'));
+		assert.ok(host.querySelector('[aria-label="发送"]'));
 		await submit();
 		assert.equal(sends, 2);
 		await act(async () => { update({ busy: false, sendAllowed: false }); });
-		assert.equal(host.querySelector<HTMLButtonElement>('[aria-label="Send"]')!.disabled, true);
+		assert.equal(host.querySelector<HTMLButtonElement>('[aria-label="发送"]')!.disabled, true);
 		await submit();
 		assert.equal(sends, 2, "a closed send gate must win over local text");
 	});

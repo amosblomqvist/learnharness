@@ -69,8 +69,8 @@ it("cycles and missing parents are refused; moving never changes a source key", 
 	const [a, b, c] = state.folders.map((f) => f.id);
 	assert.equal(canMoveFolder(state, a!, c!), false);
 	assert.equal(canMoveFolder(state, a!, a!), false);
-	assert.throws(() => apply(state, { action: "move", kind: "folder", id: a, parentId: c }), /descendants/);
-	assert.throws(() => apply(state, { action: "move", kind: "source", id: "s1", parentId: "missing" }), /no longer exists/);
+	assert.throws(() => apply(state, { action: "move", kind: "folder", id: a, parentId: c }), /自身或其子文件夹/);
+	assert.throws(() => apply(state, { action: "move", kind: "source", id: "s1", parentId: "missing" }), /已不存在/);
 	state = apply(state, { action: "move", kind: "source", id: "s1", parentId: b });
 	assert.deepEqual(Object.keys(state.placements), ["s1"]);
 });
@@ -79,8 +79,8 @@ it("only structurally empty folders can be removed; an empty source record still
 	let state = placeImportedSource(emptySourceOrganization(), "s1", "A/B/a.md", fresh);
 	const a = state.folders[0]!.id, b = state.folders[1]!.id;
 	assert.equal(folderIsEmpty(state, b, new Set(["s1"])), false);
-	assert.throws(() => apply(state, { action: "delete-folder", id: b }), /Only empty/);
-	assert.throws(() => apply(state, { action: "delete-folder", id: a }), /Only empty/);
+	assert.throws(() => apply(state, { action: "delete-folder", id: b }), /只能删除空文件夹/);
+	assert.throws(() => apply(state, { action: "delete-folder", id: a }), /只能删除空文件夹/);
 	state = apply(state, { action: "move", kind: "source", id: "s1", parentId: null });
 	state = apply(state, { action: "delete-folder", id: b });
 	assert.equal(state.folders.length, 1);
@@ -93,5 +93,5 @@ it("action validation rejects invalid shapes, but trims nonempty names like sess
 });
 
 it("corrupt/newer organization refuses instead of silently resetting or allowing cycles", () => {
-	for (const raw of [{ version: 2, folders: [], placements: {} }, { version: 1, folders: [{ id: "a", name: "A", parentId: "a", createdAt: "x" }], placements: {} }, { version: 1, folders: [], placements: { s: { folderId: "gone" } } }]) assert.throws(() => parseSourceOrganization(raw), /invalid or newer/);
+	for (const raw of [{ version: 2, folders: [], placements: {} }, { version: 1, folders: [{ id: "a", name: "A", parentId: "a", createdAt: "x" }], placements: {} }, { version: 1, folders: [], placements: { s: { folderId: "gone" } } }]) assert.throws(() => parseSourceOrganization(raw), /数据无效，或由更新版本的应用写入/);
 });

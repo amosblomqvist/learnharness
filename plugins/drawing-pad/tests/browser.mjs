@@ -96,7 +96,7 @@ try {
   };
   const label = () => run(() => document.querySelector("#draw").textContent);
   const selectedTool = () => run(() => document.querySelector('.drawing-pad-tools button[data-variant="secondary"]')?.getAttribute("aria-label"));
-  const editButtons = () => run(() => ["Undo", "Clear"].map(name => {
+  const editButtons = () => run(() => ["撤销", "清空"].map(name => {
     const button = [...document.querySelectorAll(".drawing-pad-tools button")]
       .find(button => (button.getAttribute("aria-label") ?? button.textContent) === name);
     return [button.disabled, getComputedStyle(button).opacity];
@@ -132,7 +132,7 @@ try {
     draft: { text: "NEVER CAPTURE LEARNER DRAFT", values: ["a"], thinking: "private thinking" } };
   assert.deepEqual((await call("actions")).map(action => [action.id, action.shortcut?.defaultBinding]),
     [["draw", "mod+shift+d"], ["undo", "mod+z"], ["toggle-pen-eraser", "mod+shift+e"], ["hand", "mod+shift+h"]]);
-  assert.deepEqual(await run(() => window.fixture.placement.sessions), ["teaching", "practice"]); assert.equal(await label(), "Draw");
+  assert.deepEqual(await run(() => window.fixture.placement.sessions), ["teaching", "practice"]); assert.equal(await label(), "绘图");
   assert.equal(await run(() => window.fixture.saved().imageScale), 50);
   await setScale(100);
   group("public action placement, default 50 percent scale, and accepted scale preference changes");
@@ -172,8 +172,8 @@ try {
   assert.deepEqual(await pageStyles(), stylesBefore);
   group("nested relative imports embed only used fonts without changing live CSS or dark page colors");
   const iconButtons = await run(() => [...document.querySelectorAll(".drawing-pad-tools button[aria-label]")].map(button => ({ name: button.getAttribute("aria-label"), title: button.title, text: button.textContent, svg: !!button.querySelector("svg") })));
-  for (const name of ["Pen", "Eraser", "Hand", "Undo"]) assert.deepEqual(iconButtons.find(button => button.name === name), { name, title: name, text: "", svg: true });
-  assert.equal(await run(() => [...document.querySelectorAll(".drawing-pad-tools button")].find(button => button.textContent === "Clear")?.querySelector("svg") === null), true);
+  for (const name of ["画笔", "橡皮擦", "抓手", "撤销"]) assert.deepEqual(iconButtons.find(button => button.name === name), { name, title: name, text: "", svg: true });
+  assert.equal(await run(() => [...document.querySelectorAll(".drawing-pad-tools button")].find(button => button.textContent === "清空")?.querySelector("svg") === null), true);
   group("Pen/Eraser/Hand/Undo are accessible icon-only controls; Clear remains text");
 
   const toolbarLayout = await run(() => {
@@ -188,24 +188,24 @@ try {
   await page.mouse.move(topCanvas.x + topCanvas.width - 220, topCanvas.y + 16); await page.mouse.down();
   await page.mouse.move(topCanvas.x + topCanvas.width - 100, topCanvas.y + 16, { steps: 6 }); await page.mouse.up();
   assert.ok(await ink() > 100, "the top strip outside the controls is drawable");
-  await page.click('.drawing-pad-tools button[aria-label="Undo"]'); assert.equal(await ink(), 0);
+  await page.click('.drawing-pad-tools button[aria-label="撤销"]'); assert.equal(await ink(), 0);
   await page.mouse.click(topCanvas.x + 2, topCanvas.y + 2); assert.ok(await ink() > 0, "transparent toolbar padding passes pointer input through");
-  await page.click('.drawing-pad-tools button[aria-label="Undo"]'); assert.equal(await ink(), 0);
-  await page.click('.drawing-pad-tools button[aria-label="Hand"]'); assert.equal(await run(() => document.querySelector('.drawing-pad-tools button[aria-label="Hand"]').dataset.variant), "secondary");
-  assert.equal(await ink(), 0, "clicking a tool does not also draw beneath it"); await page.click('.drawing-pad-tools button[aria-label="Pen"]');
+  await page.click('.drawing-pad-tools button[aria-label="撤销"]'); assert.equal(await ink(), 0);
+  await page.click('.drawing-pad-tools button[aria-label="抓手"]'); assert.equal(await run(() => document.querySelector('.drawing-pad-tools button[aria-label="抓手"]').dataset.variant), "secondary");
+  assert.equal(await ink(), 0, "clicking a tool does not also draw beneath it"); await page.click('.drawing-pad-tools button[aria-label="画笔"]');
   group("compact top-left controls reserve no row: full-surface top strip/padding draw while buttons remain clickable");
 
-  await stroke(); const inkBefore = await ink(); assert.ok(inkBefore > 100); assert.equal(await label(), "Draw (unsent)");
+  await stroke(); const inkBefore = await ink(); assert.ok(inkBefore > 100); assert.equal(await label(), "绘图（未发送）");
   await close(); assert.equal(await page.$("#pad"), null); assert.equal(await run(() => window.fixture.attempts.length), 0);
   await open(); assert.equal(await bg(), initialBackground); assert.equal(await ink(), inkBefore);
   await page.click("#draw"); assert.equal(await page.$("#pad"), null); await open();
   group("mouse ink and button/Escape close preserve work without sending");
 
   const refused = await call("submit", { accept: false }); assert.equal(images(refused).length, 1); assert.equal(await ink(), inkBefore);
-  assert.equal(await label(), "Draw (unsent)");
+  assert.equal(await label(), "绘图（未发送）");
   const cancelled = await call("submit", { cancel: true }); assert.match(cancelled.error, /cancel/i); assert.equal(await ink(), inkBefore);
   const accepted = await call("submit"); assert.equal(images(accepted).length, 1); assert.equal(accepted.answer.text, "fixture answer");
-  assert.match(images(accepted)[0].data, /^iVBORw0KGgo/); assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  assert.match(images(accepted)[0].data, /^iVBORw0KGgo/); assert.equal(await ink(), 0); assert.equal(await label(), "绘图");
   const bitmap = await page.evaluate(async data => {
     const image = new Image(); image.src = `data:image/png;base64,${data}`; await image.decode();
     const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
@@ -223,19 +223,19 @@ try {
   group("teaching refusal/cancel retention, real PNG export, acceptance clears");
 
   await stroke(); await call("submit", { defer: true }); await stroke(-.2); const newer = await ink(); await call("ack");
-  assert.equal(await ink(), newer); assert.equal(await label(), "Draw (unsent)");
-  await call("navigate", "other", "teaching"); assert.equal(await label(), "Draw"); await open(); assert.equal(await ink(), 0); await stroke();
-  await call("navigate", "teach", "teaching", question); assert.equal(await label(), "Draw (unsent)"); await open(); assert.equal(await ink(), newer);
+  assert.equal(await ink(), newer); assert.equal(await label(), "绘图（未发送）");
+  await call("navigate", "other", "teaching"); assert.equal(await label(), "绘图"); await open(); assert.equal(await ink(), 0); await stroke();
+  await call("navigate", "teach", "teaching", question); assert.equal(await label(), "绘图（未发送）"); await open(); assert.equal(await ink(), newer);
   group("late acknowledgments cannot erase newer work; navigation isolates sessions");
 
-  await button("Clear"); assert.equal(await ink(), 0); await stroke();
-  await button("Eraser"); await stroke(); assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  await button("清空"); assert.equal(await ink(), 0); await stroke();
+  await button("橡皮擦"); await stroke(); assert.equal(await ink(), 0); assert.equal(await label(), "绘图");
   const empty = await call("submit", { accept: false }); assert.equal(images(empty).length, 0);
-  await button("Undo"); assert.ok(await ink() > 0);
+  await button("撤销"); assert.ok(await ink() > 0);
   await page.focus(".drawing-pad-viewport"); await page.keyboard.down("Control"); await page.keyboard.press("z"); await page.keyboard.up("Control"); assert.equal(await ink(), 0);
   group("whole-stroke erase, full erasure sends nothing, Undo and local keyboard Undo");
 
-  await button("Pen"); const beforeTouch = await ink();
+  await button("画笔"); const beforeTouch = await ink();
   await run(() => { const canvas = document.querySelector(".drawing-pad-ink"), rect = canvas.getBoundingClientRect();
     canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 900, pointerType: "touch", button: 0, buttons: 1, pressure: .8, clientX: rect.x + 100, clientY: rect.y + 100 })); });
   assert.equal(await ink(), beforeTouch);
@@ -248,7 +248,7 @@ try {
   assert.ok(await ink() > beforeTouch); await cdp.detach();
   group("touch and stationary right-click add no ink; browser-generated pressure-pen input draws");
 
-  await button("Clear"); await stroke(); const originalPen = await ink();
+  await button("清空"); await stroke(); const originalPen = await ink();
   await run(() => document.querySelector(".drawing-pad-ink").addEventListener("pointerdown", event => { window.fixture.lastPenId = event.pointerId; }, { once: true }));
   const stylus = await page.createCDPSession(), penBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await stylus.send("Input.dispatchMouseEvent", { type: "mousePressed", x: penBox.x + penBox.width * .3, y: penBox.y + penBox.height * .7, button: "left", buttons: 1, pointerType: "pen", force: 0 });
@@ -273,13 +273,13 @@ try {
   });
   assert.equal(await ink(), beforeHover, "hover never joins distant pen points");
   await stylus.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: penBox.x + penBox.width * .9, y: penBox.y + penBox.height * .3, button: "left", pointerType: "pen", force: 0 });
-  await stylus.detach(); await button("Undo"); assert.equal(await ink(), 0); await button("Undo"); assert.equal(await ink(), originalPen);
+  await stylus.detach(); await button("撤销"); assert.equal(await ink(), 0); await button("撤销"); assert.equal(await ink(), originalPen);
   group("zero-pressure hover and held/released stylus eraser preserve complete-stroke Undo");
 
   await call("setHistory", "practice", pose("p1"));
   const problem = { type: "thinking", expanded: true, problem: { statement: "Compute $\\frac{1}{2}+\\frac{1}{2}$.", occurrence: occurrence("p1") }, draft: { thinking: "" } };
   await call("navigate", "practice", "practice", problem); await open(); await stroke(); const practiceInk = await ink();
-  let result = await call("submit"); assert.equal(images(result).length, 1); assert.equal(await ink(), practiceInk); assert.equal(await label(), "Draw");
+  let result = await call("submit"); assert.equal(images(result).length, 1); assert.equal(await ink(), practiceInk); assert.equal(await label(), "绘图");
   result = await call("submit"); assert.equal(images(result).length, 0); assert.equal(await ink(), practiceInk);
   await stroke(-.2); result = await call("submit"); assert.equal(images(result).length, 1); assert.ok(await ink() > practiceInk);
   result = await call("submit"); assert.equal(images(result).length, 0);
@@ -299,15 +299,15 @@ try {
   await call("setHistory", "practice", failed); await call("event", "turn-settled"); await page.waitForNetworkIdle(); assert.ok(await page.$("#pad"));
   const p2 = { ...problem, problem: { statement: "A genuinely new problem $2+2$.", occurrence: occurrence("p2") } };
   await call("setHistory", "practice", [...history, ...pose("p2")]); await call("setInput", p2); await call("event", "turn-settled");
-  await page.waitForFunction(() => !document.querySelector("#pad")); assert.equal(await label(), "Draw");
+  await page.waitForFunction(() => !document.querySelector("#pad")); assert.equal(await label(), "绘图");
   await open(); assert.equal(await ink(), 0); assert.ok((await run(() => window.fixture.markdownLog)).includes(p2.problem.statement));
   group("failed poses retain work; an accepted new problem closes/resets and reopens fresh");
 
   await stroke(); await call("submit"); await setInk("dark", "#12AB34");
-  assert.equal(await label(), "Draw (unsent)");
+  assert.equal(await label(), "绘图（未发送）");
   assert.deepEqual(await inkRGB(), [18, 171, 52]);
   await call("showSettings"); await page.$eval("#dark-ink", field => { field.focus(); field.select(); }); await page.keyboard.type("#abc"); await page.click("#blur-target");
-  assert.equal(await run(() => window.fixture.saved().darkInkColor), "#12ab34"); assert.match(await run(() => document.querySelector("#setting-error").textContent), /six-digit/);
+  assert.equal(await run(() => window.fixture.saved().darkInkColor), "#12ab34"); assert.match(await run(() => document.querySelector("#setting-error").textContent), /六位十六进制颜色/);
   await call("notifySettings", { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 });
   assert.deepEqual(await inkRGB(), [18, 171, 52]); assert.equal(await run(() => window.fixture.saved().darkInkColor), "#12ab34");
   await page.keyboard.press("Escape");
@@ -348,7 +348,7 @@ try {
   await call("navigate", "hidden", "teaching", { ...question, revealed: false }); const logBefore = (await run(() => window.fixture.markdownLog)).length;
   await open(); assert.equal((await run(() => window.fixture.markdownLog)).length, logBefore); await stroke();
   const blankBackground = await bg(); await close(); await call("setInput", question); await open(); assert.equal(await bg(), blankBackground);
-  await button("Clear"); await close(); await open(); assert.ok((await run(() => window.fixture.markdownLog)).length > logBefore);
+  await button("清空"); await close(); await open(); assert.ok((await run(() => window.fixture.markdownLog)).length > logBefore);
   group("unrevealed checks start blank; existing ink freezes the original blank reference");
 
   await call("navigate", "custom", "teaching", { type: "plugin-question-answer", question: { occurrence: occurrence("q-custom"), questionId: "custom" } });
@@ -360,8 +360,8 @@ try {
   group("custom questions/problems stay blank and preserve falsy JSON with native image channels");
 
   await stroke(-.2); await run(() => { window.fixture.failLifecycle = true; });
-  const syncFailure = await call("submit"); assert.match(syncFailure.error, /lifecycle/); assert.equal(await label(), "Draw (unsent)");
-  await run(() => { window.fixture.failLifecycle = false; }); await call("submit"); assert.equal(await label(), "Draw");
+  const syncFailure = await call("submit"); assert.match(syncFailure.error, /lifecycle/); assert.equal(await label(), "绘图（未发送）");
+  await run(() => { window.fixture.failLifecycle = false; }); await call("submit"); assert.equal(await label(), "绘图");
   group("lifecycle read refusal fails closed and retains pending practice changes");
 
   await call("setHistory", "export-race", pose("race1"));
@@ -373,7 +373,7 @@ try {
   await call("setInput", { ...problem, problem: { statement: "Next problem $2+2$.", occurrence: occurrence("race2") } });
   await call("event", "turn-settled"); await page.waitForFunction(() => !document.querySelector("#pad"));
   await run(() => { window.fixture.holdDecode = false; window.fixture.releaseDecodes(); });
-  const staleExport = await run(() => window.fixture.pendingSubmission); assert.match(staleExport.error, /sheet was reset/);
+  const staleExport = await run(() => window.fixture.pendingSubmission); assert.match(staleExport.error, /画纸已被重置/);
   await open(); assert.equal(await ink(), 0); await stroke(); result = await call("submit"); assert.equal(images(result).length, 1);
   group("a new accepted problem during async export cannot deliver the previous problem's drawing");
 
@@ -424,8 +424,8 @@ try {
 
   await stroke(); const replayInk = await ink(), replayBackground = await bg();
   await call("replayContent"); await waitForSheet();
-  assert.equal(await ink(), replayInk); assert.equal(await bg(), replayBackground); assert.equal(await label(), "Draw (unsent)");
-  await button("Undo"); assert.equal(await ink(), 0);
+  assert.equal(await ink(), replayInk); assert.equal(await bg(), replayBackground); assert.equal(await label(), "绘图（未发送）");
+  await button("撤销"); assert.equal(await ink(), 0);
   group("replaying a mounted sheet preserves frozen reference, ink and editable Undo history");
 
   assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "empty history remains visibly disabled");
@@ -439,14 +439,14 @@ try {
   // Bypass the native disabled click suppression to check the handler guards too.
   await run(() => {
     for (const button of document.querySelectorAll(".drawing-pad-tools button")) {
-      if (button.getAttribute("aria-label") === "Undo" || button.textContent === "Clear") button.dispatchEvent(new MouseEvent("click"));
+      if (button.getAttribute("aria-label") === "撤销" || button.textContent === "清空") button.dispatchEvent(new MouseEvent("click"));
     }
   });
   await page.mouse.up();
   assert.deepEqual(await editButtons(), available, "both commands are available again after release");
   assert.ok(await ink() > committedInk, "the held stroke still commits");
-  await button("Undo"); assert.equal(await ink(), committedInk, "neither blocked command removed the earlier stroke");
-  await button("Clear"); assert.equal(await ink(), 0);
+  await button("撤销"); assert.equal(await ink(), committedInk, "neither blocked command removed the earlier stroke");
+  await button("清空"); assert.equal(await ink(), 0);
   assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "clearing restores the normal disabled appearance");
   group("Undo and Clear stay visually steady but disabled during a stroke");
 
@@ -457,14 +457,14 @@ try {
   await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 40, y: firstPenY + 10, buttons: 1, pointerType: "pen", force: .5 });
   assert.deepEqual(await editButtons(), emptyButtons, "the first live stroke does not brighten Undo or Clear");
   await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 50, y: firstPenY + 12, buttons: 1, pointerType: "pen", force: 0 });
-  assert.equal(await label(), "Draw (unsent)", "zero pressure committed the first segment before release");
+  assert.equal(await label(), "绘图（未发送）", "zero pressure committed the first segment before release");
   assert.deepEqual(await editButtons(), emptyButtons, "a mid-gesture commit does not brighten the still-disabled controls");
   await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 60, y: firstPenY + 14, buttons: 1, pointerType: "pen", force: .7 });
   assert.deepEqual(await editButtons(), emptyButtons, "resuming pressure does not change the toolbar appearance");
   await firstPen.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: firstPenX + 60, y: firstPenY + 14, button: "left", pointerType: "pen", force: 0 });
   await firstPen.detach();
   assert.deepEqual(await editButtons(), available, "release enables and brightens Undo and Clear");
-  await button("Clear"); assert.equal(await ink(), 0);
+  await button("清空"); assert.equal(await ink(), 0);
   group("a pressure gap during the first pen gesture keeps editing controls dim until release");
 
   const activeBox = await (await page.$(".drawing-pad-ink")).boundingBox();
@@ -486,7 +486,7 @@ try {
     await page.mouse.move(x + dx, y + dy, { steps: 6 }); await page.mouse.up({ button: mouseButton });
   };
   const refPosition = () => run(() => { const r = document.querySelector(".drawing-pad-background").getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
-  const worldReference = await refPosition(); await button("Hand"); await panBy(200, -100);
+  const worldReference = await refPosition(); await button("抓手"); await panBy(200, -100);
   const movedReference = await refPosition();
   assert.deepEqual(movedReference, [worldReference[0] + 200, worldReference[1] - 100, worldReference[2], worldReference[3]]);
   await page.setViewport({ width: 1400, height: 800, deviceScaleFactor: 1 });
@@ -504,28 +504,28 @@ try {
   assert.equal(images(await call("submit", { accept: false }))[0].data, initialWorldImage);
   await panBy(-200, 100);
   for (let i = 0; i < 4; i++) await panBy(400, 0);
-  assert.equal(await ink(), 0); assert.equal(await label(), "Draw (unsent)");
+  assert.equal(await ink(), 0); assert.equal(await label(), "绘图（未发送）");
   assert.equal(images(await call("submit", { accept: false }))[0].data, initialWorldImage, "off-screen ink is still exported");
-  await button("Pen"); await stroke();
+  await button("画笔"); await stroke();
   const expandedImage = images(await call("submit", { accept: false }))[0].data; assert.notEqual(expandedImage, initialWorldImage);
   const expandedSize = await pngSize(expandedImage);
   assert.equal(Math.max(...expandedSize), 2000); assert.ok(Math.min(...expandedSize) > 0);
-  await button("Eraser"); await stroke(); assert.equal(images(await call("submit", { accept: false }))[0].data, initialWorldImage);
-  await button("Undo"); assert.equal(images(await call("submit", { accept: false }))[0].data, expandedImage);
+  await button("橡皮擦"); await stroke(); assert.equal(images(await call("submit", { accept: false }))[0].data, initialWorldImage);
+  await button("撤销"); assert.equal(images(await call("submit", { accept: false }))[0].data, expandedImage);
   group("remote ink erases/undoes at fixed scale and a large complete crop downsamples to 2000 pixels");
-  await button("Hand"); for (let i = 0; i < 4; i++) await panBy(-400, 0);
+  await button("抓手"); for (let i = 0; i < 4; i++) await panBy(-400, 0);
   assert.ok(await ink() > 0); assert.equal(images(await call("submit", { accept: false }))[0].data, expandedImage);
-  await button("Clear"); assert.equal(await ink(), 0); assert.equal(images(await call("submit", { accept: false })).length, 0);
-  await button("Pen");
+  await button("清空"); assert.equal(await ink(), 0); assert.equal(images(await call("submit", { accept: false })).length, 0);
+  await button("画笔");
   group("Hand translates reference and ink together; camera survives close/remount without changing exported bytes");
   group("work beyond the original window remains editable/exportable and crop is independent of the camera");
 
   await call("navigate", "minimal-blank", "teaching", { type: "text" }); await open(); await page.click(".drawing-pad-ink");
   const dotImage = images(await call("submit", { accept: false }))[0].data;
   assert.deepEqual(await pngSize(dotImage), [52, 52], "one dot plus the existing 24px padding, not a viewport-sized PNG");
-  await call("submit", { defer: true }); await button("Hand"); await panBy(400, 100);
+  await call("submit", { defer: true }); await button("抓手"); await panBy(400, 100);
   assert.equal(images(await call("submit", { accept: false }))[0].data, dotImage);
-  await call("ack"); assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  await call("ack"); assert.equal(await ink(), 0); assert.equal(await label(), "绘图");
   group("blank sheets export only ink bounds; panning cannot invalidate a pending teaching acceptance");
 
   await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 2 });
@@ -539,28 +539,28 @@ try {
   await setScale(50); await call("navigate", "scale-preference", "practice", { type: "text" }); await open(); await page.click(".drawing-pad-ink");
   assert.deepEqual(await pngSize(images(await call("submit"))[0].data), [26, 26]);
   const preferenceInk = await ink(); await setScale(25);
-  assert.equal(await ink(), preferenceInk); assert.equal(await label(), "Draw"); assert.equal(images(await call("submit")).length, 0);
+  assert.equal(await ink(), preferenceInk); assert.equal(await label(), "绘图"); assert.equal(images(await call("submit")).length, 0);
   await stroke(); const scaled25 = await pngSize(images(await call("submit", { accept: false }))[0].data);
   const inkAt25 = await ink(); await setScale(50); const scaled50 = await pngSize(images(await call("submit", { accept: false }))[0].data);
   assert.ok(scaled50.every((size, index) => Math.abs(size - scaled25[index] * 2) <= 1)); assert.equal(await ink(), inkAt25);
   await call("showSettings"); await page.$eval("#image-scale", field => { field.focus(); field.select(); }); await page.keyboard.type("0"); await page.click("#blur-target");
-  assert.equal(await run(() => window.fixture.saved().imageScale), 50); assert.match(await run(() => document.querySelector("#setting-error").textContent), /greater than 0/);
+  assert.equal(await run(() => window.fixture.saved().imageScale), 50); assert.match(await run(() => document.querySelector("#setting-error").textContent), /大于 0/);
   await page.keyboard.press("Escape"); await setScale(100);
   group("scale preference changes only PNG resolution, validates percentages, and never resends unchanged practice ink");
 
   await call("navigate", "right-pan", "teaching", question); await open(); await stroke();
   const rightPanImage = images(await call("submit", { accept: false }))[0].data, rightPanInk = await ink();
-  for (const tool of ["Pen", "Eraser", "Hand"]) {
+  for (const tool of ["画笔", "橡皮擦", "抓手"]) {
     await button(tool); const before = await refPosition(); await panBy(120, -60, "right");
     assert.deepEqual(await refPosition(), [before[0] + 120, before[1] - 60, before[2], before[3]]);
     assert.equal(await selectedTool(), tool); assert.equal(images(await call("submit", { accept: false }))[0].data, rightPanImage);
     await panBy(-120, 60, "right"); assert.deepEqual(await refPosition(), before); assert.equal(await ink(), rightPanInk);
-    assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), tool === "Hand" ? "grab" : "default");
+    assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), tool === "抓手" ? "grab" : "default");
   }
-  await button("Undo"); assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  await button("撤销"); assert.equal(await ink(), 0); assert.equal(await label(), "绘图");
   group("right-mouse drag pans with Pen/Eraser/Hand without changing tools, PNG content, or Undo history");
 
-  await button("Pen"); await stroke(); const capturedRightImage = images(await call("submit", { accept: false }))[0].data;
+  await button("画笔"); await stroke(); const capturedRightImage = images(await call("submit", { accept: false }))[0].data;
   const rightBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   const rightDown = async (x, y) => {
     await run(() => document.querySelector(".drawing-pad-ink").addEventListener("pointerdown", event => { window.fixture.rightPanId = event.pointerId; }, { once: true }));
@@ -568,7 +568,7 @@ try {
   };
   const beforeOutsidePan = await refPosition(); await rightDown(rightBox.x + 50, rightBox.y + 250);
   assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), "grabbing");
-  await chord("z"); await chord("h", true); assert.equal(await selectedTool(), "Pen");
+  await chord("z"); await chord("h", true); assert.equal(await selectedTool(), "画笔");
   assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+z").at(-1).invoked), false);
   await page.mouse.move(rightBox.x - 50, rightBox.y + 290, { steps: 5 }); await page.mouse.up({ button: "right" });
   assert.deepEqual(await refPosition(), [beforeOutsidePan[0] - 100, beforeOutsidePan[1] + 40, beforeOutsidePan[2], beforeOutsidePan[3]]);
@@ -577,7 +577,7 @@ try {
   await rightDown(centerX, centerY); await page.mouse.move(centerX + 70, centerY + 30);
   await page.mouse.down({ button: "left" }); await page.mouse.up({ button: "right" }); const releasedReference = await refPosition();
   await page.mouse.move(centerX + 150, centerY + 70); await page.mouse.up({ button: "left" });
-  assert.deepEqual(await refPosition(), releasedReference); assert.equal(await selectedTool(), "Pen");
+  assert.deepEqual(await refPosition(), releasedReference); assert.equal(await selectedTool(), "画笔");
   await panBy(-70, -30, "right"); assert.deepEqual(await refPosition(), beforeOutsidePan);
   assert.equal(images(await call("submit", { accept: false }))[0].data, capturedRightImage);
   group("right-pan captures outside-canvas release, blocks editing commands, and stops when Right releases even with Left held");
@@ -591,20 +591,20 @@ try {
       else canvas.releasePointerCapture(pointerId);
     }, mode);
     await page.mouse.move(centerX + 100, centerY + 20); await page.mouse.up({ button: "right" });
-    assert.deepEqual(await refPosition(), atCancellation); assert.equal(await selectedTool(), "Pen");
+    assert.deepEqual(await refPosition(), atCancellation); assert.equal(await selectedTool(), "画笔");
     assert.equal(await run(() => document.querySelector(".drawing-pad-ink").style.cursor), "default");
     await panBy(-60, 25, "right"); assert.deepEqual(await refPosition(), before);
   }
   const beforePanReplay = await refPosition(); await rightDown(centerX, centerY); await page.mouse.move(centerX + 40, centerY + 20);
   await call("replayContent"); await page.mouse.up({ button: "right" }); await waitForSheet();
   assert.deepEqual(await refPosition(), [beforePanReplay[0] + 40, beforePanReplay[1] + 20, beforePanReplay[2], beforePanReplay[3]]);
-  await panBy(-40, -20, "right"); assert.equal(await selectedTool(), "Pen");
+  await panBy(-40, -20, "right"); assert.equal(await selectedTool(), "画笔");
   assert.equal(images(await call("submit", { accept: false }))[0].data, capturedRightImage);
-  await button("Undo"); assert.equal(await ink(), 0);
+  await button("撤销"); assert.equal(await ink(), 0);
   group("right-pan cancellation, lost pointer capture, and development remount end the gesture without ink or Undo entries");
 
   await stroke(); await call("submit", { defer: true }); await panBy(80, 50, "right"); await call("ack");
-  assert.equal(await ink(), 0); assert.equal(await label(), "Draw");
+  assert.equal(await ink(), 0); assert.equal(await label(), "绘图");
   await panBy(-80, -50, "right"); assert.equal(images(await call("submit", { accept: false })).length, 0);
   group("right-pan is camera-only: pending teaching acceptance still clears ink and empty pans send no image");
 
@@ -614,44 +614,44 @@ try {
   await chord("d", true, "Control"); await waitForSheet(); assert.equal(await ink(), shortcutInk);
   group("real host action registry/dispatcher opens and toggles Draw with Cmd/Ctrl+Shift+D while retaining ink");
 
-  assert.equal(await selectedTool(), "Pen"); await chord("e", true); assert.equal(await selectedTool(), "Eraser");
-  assert.equal(await ink(), shortcutInk); await chord("e", true, "Control"); assert.equal(await selectedTool(), "Pen");
-  await button("Hand"); await chord("e", true); assert.equal(await selectedTool(), "Pen"); assert.equal(await ink(), shortcutInk);
+  assert.equal(await selectedTool(), "画笔"); await chord("e", true); assert.equal(await selectedTool(), "橡皮擦");
+  assert.equal(await ink(), shortcutInk); await chord("e", true, "Control"); assert.equal(await selectedTool(), "画笔");
+  await button("抓手"); await chord("e", true); assert.equal(await selectedTool(), "画笔"); assert.equal(await ink(), shortcutInk);
   group("Cmd/Ctrl+Shift+E toggles Pen/Eraser, switches Hand to Pen, and never changes drawing content");
 
-  await chord("h", true); assert.equal(await selectedTool(), "Hand");
-  await chord("h", true, "Control"); assert.equal(await selectedTool(), "Hand"); assert.equal(await ink(), shortcutInk);
-  await chord("e", true); assert.equal(await selectedTool(), "Pen");
-  await chord("e", true); assert.equal(await selectedTool(), "Eraser");
-  await chord("h", true); assert.equal(await selectedTool(), "Hand");
-  await chord("e", true); assert.equal(await selectedTool(), "Pen"); assert.equal(await ink(), shortcutInk);
+  await chord("h", true); assert.equal(await selectedTool(), "抓手");
+  await chord("h", true, "Control"); assert.equal(await selectedTool(), "抓手"); assert.equal(await ink(), shortcutInk);
+  await chord("e", true); assert.equal(await selectedTool(), "画笔");
+  await chord("e", true); assert.equal(await selectedTool(), "橡皮擦");
+  await chord("h", true); assert.equal(await selectedTool(), "抓手");
+  await chord("e", true); assert.equal(await selectedTool(), "画笔"); assert.equal(await ink(), shortcutInk);
   group("Cmd/Ctrl+Shift+H selects Hand without toggling off or changing ink; Pen/Eraser binding remains unchanged");
 
   await call("showKeyboard");
-  for (const [id, name] of [["draw", "Draw"], ["undo", "Undo drawing"], ["toggle-pen-eraser", "Toggle pen/eraser"], ["hand", "Hand"]]) {
+  for (const [id, name] of [["draw", "绘图"], ["undo", "撤销绘图"], ["toggle-pen-eraser", "切换画笔/橡皮擦"], ["hand", "抓手"]]) {
     const selector = `[data-testid="kbd-row-plugin:drawing-pad:${id}"]`;
     await page.waitForSelector(selector); assert.ok((await page.$eval(selector, row => row.textContent)).includes(name));
   }
   await page.click('[data-testid="kbd-rebind-plugin:drawing-pad:toggle-pen-eraser"]'); await chord("p", true);
   await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:toggle-pen-eraser"]');
-  await call("hideKeyboard"); await page.focus(".drawing-pad-viewport"); await chord("e", true); assert.equal(await selectedTool(), "Pen");
-  await chord("p", true); assert.equal(await selectedTool(), "Eraser");
+  await call("hideKeyboard"); await page.focus(".drawing-pad-viewport"); await chord("e", true); assert.equal(await selectedTool(), "画笔");
+  await chord("p", true); assert.equal(await selectedTool(), "橡皮擦");
   await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:toggle-pen-eraser"]');
   await page.click('[data-testid="kbd-reset-plugin:drawing-pad:toggle-pen-eraser"]'); await call("hideKeyboard");
-  await page.focus(".drawing-pad-viewport"); await chord("e", true); assert.equal(await selectedTool(), "Pen");
+  await page.focus(".drawing-pad-viewport"); await chord("e", true); assert.equal(await selectedTool(), "画笔");
   group("all four Drawing Pad actions appear in real host Keyboard Settings and its Rebind/Reset controls work");
   await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-rebind-plugin:drawing-pad:hand"]');
   await page.click('[data-testid="kbd-rebind-plugin:drawing-pad:hand"]'); await chord("j", true);
   await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:hand"]'); await call("hideKeyboard");
-  await page.focus(".drawing-pad-viewport"); await chord("h", true); assert.equal(await selectedTool(), "Pen");
-  await chord("j", true); assert.equal(await selectedTool(), "Hand");
+  await page.focus(".drawing-pad-viewport"); await chord("h", true); assert.equal(await selectedTool(), "画笔");
+  await chord("j", true); assert.equal(await selectedTool(), "抓手");
   await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-clear-plugin:drawing-pad:hand"]');
   await page.click('[data-testid="kbd-clear-plugin:drawing-pad:hand"]'); await call("hideKeyboard");
-  await button("Pen"); await chord("j", true); assert.equal(await selectedTool(), "Pen");
+  await button("画笔"); await chord("j", true); assert.equal(await selectedTool(), "画笔");
   await call("showKeyboard"); await page.waitForSelector('[data-testid="kbd-reset-plugin:drawing-pad:hand"]');
   await page.click('[data-testid="kbd-reset-plugin:drawing-pad:hand"]'); await call("hideKeyboard");
-  await page.focus(".drawing-pad-viewport"); await chord("h", true); assert.equal(await selectedTool(), "Hand");
-  await chord("e", true); assert.equal(await selectedTool(), "Pen");
+  await page.focus(".drawing-pad-viewport"); await chord("h", true); assert.equal(await selectedTool(), "抓手");
+  await chord("e", true); assert.equal(await selectedTool(), "画笔");
   group("Hand obeys actual Keyboard Settings Rebind/Clear/Reset and restores its default shortcut");
 
   for (const [tag, inside] of [["input", true], ["textarea", false], ["div", true]]) {
@@ -663,7 +663,7 @@ try {
     }, { tag, inside });
     await page.focus("#shortcut-editor"); await page.keyboard.type("native typing");
     const textBefore = await run(() => document.querySelector("#shortcut-editor").value ?? document.querySelector("#shortcut-editor").textContent);
-    await chord("h", true); await chord("e", true); assert.equal(await selectedTool(), "Pen");
+    await chord("h", true); await chord("e", true); assert.equal(await selectedTool(), "画笔");
     // Headless Chrome has no OS Edit menu accelerator: attach Blink's native
     // Undo command to the real key event. preventDefault would still block it.
     await chord("z", false, "Meta", ["Undo"]);
@@ -683,13 +683,13 @@ try {
   await stroke(); const blockedInk = await ink();
   for (const kind of ["modal", "popup", "view"]) {
     await call("blockShortcut", kind); await chord("z"); await chord("d", true); await chord("e", true); await chord("h", true);
-    assert.equal(await selectedTool(), "Pen"); assert.ok(await page.$("#pad")); assert.equal(await ink(), blockedInk); await call("unblockShortcut");
+    assert.equal(await selectedTool(), "画笔"); assert.ok(await page.$("#pad")); assert.equal(await ink(), blockedInk); await call("unblockShortcut");
   }
   await page.focus(".drawing-pad-viewport");
   const dragBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await page.mouse.move(dragBox.x + dragBox.width * .8, dragBox.y + dragBox.height * .4); await page.mouse.down();
   await chord("z"); assert.equal(await run(() => window.fixture.keyEvents.filter(event => event.binding === "mod+z").at(-1).invoked), false);
-  await chord("e", true); await chord("h", true); assert.equal(await selectedTool(), "Pen");
+  await chord("e", true); await chord("h", true); assert.equal(await selectedTool(), "画笔");
   await page.mouse.up(); await chord("z"); assert.equal(await ink(), blockedInk);
   await chord("z"); assert.equal(await ink(), 0);
   await chord("d", true); await page.waitForFunction(() => !document.querySelector("#pad"));
@@ -699,7 +699,7 @@ try {
 
   await call("navigate", "font-response-failure", "teaching", question); await run(() => { window.fixture.fontFetchMode = "html"; });
   await page.click("#draw"); await page.waitForFunction(() => document.querySelector('.drawing-pad-status[role="alert"]'));
-  assert.match(await run(() => document.querySelector(".drawing-pad-status").textContent), /Could not load a reference font/);
+  assert.match(await run(() => document.querySelector(".drawing-pad-status").textContent), /无法加载参考字体/);
   assert.deepEqual(await pageStyles(), stylesBefore); await close();
   await run(() => { window.fixture.fontFetchMode = "normal"; }); await open();
   assert.deepEqual(await pageStyles(), stylesBefore);
@@ -733,12 +733,12 @@ try {
   const at = (fx, fy) => [economyBox.x + economyBox.width * fx, economyBox.y + economyBox.height * fy];
   const forcedRepaint = async () => {
     const tool = await selectedTool(), before = (await counts()).clears;
-    await button("Hand"); await panBy(40, 0); await panBy(-40, 0); await button(tool);
+    await button("抓手"); await panBy(40, 0); await panBy(-40, 0); await button(tool);
     assert.ok((await counts()).clears > before, "the forced repaint really repainted");
     return canvasData();
   };
   const matchesFullRepaint = async message => { const shown = await canvasData(); assert.equal(await forcedRepaint(), shown, message); };
-  await button("Pen"); let economy = await counts();
+  await button("画笔"); let economy = await counts();
   for (let i = 0; i < 20; i++) {
     const [x, y] = at(.15 + (i % 5) * .15, .3 + Math.floor(i / 5) * .08);
     await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 40, y + 15, { steps: 10 }); await page.mouse.up();
@@ -755,11 +755,11 @@ try {
   await matchesFullRepaint("a pressure-varying pen stroke equals a full repaint");
   await page.mouse.click(...at(.85, .8)); await matchesFullRepaint("a single-tap dot equals a full repaint");
   const [sx, sy] = at(.15, .3);
-  await button("Eraser"); await page.mouse.move(sx + 20, sy - 20); await page.mouse.down(); await page.mouse.move(sx + 20, sy + 30, { steps: 6 }); await page.mouse.up();
-  await button("Pen"); await matchesFullRepaint("the canvas after an eraser gesture equals a full repaint");
+  await button("橡皮擦"); await page.mouse.move(sx + 20, sy - 20); await page.mouse.down(); await page.mouse.move(sx + 20, sy + 30, { steps: 6 }); await page.mouse.up();
+  await button("画笔"); await matchesFullRepaint("the canvas after an eraser gesture equals a full repaint");
   group("repaint economy: pen strokes, pressure strokes and dots paint incrementally, pixel-identical to a full repaint");
 
-  await button("Eraser"); economy = await counts();
+  await button("橡皮擦"); economy = await counts();
   const [ex, ey] = at(.55, .12);
   await page.mouse.move(ex, ey); await page.mouse.down(); await page.mouse.move(ex + 300, ey + 20, { steps: 100 }); await page.mouse.up();
   assert.equal((await counts()).clears, economy.clears, "an eraser sweep over empty space repaints nothing");
@@ -769,17 +769,17 @@ try {
   const sweeping = await counts();
   assert.ok(sweeping.clears - economy.clears <= sweeping.frames - economy.frames, `eraser repaints ${sweeping.clears - economy.clears} within ${sweeping.frames - economy.frames} frames`);
   await page.mouse.up(); assert.ok(await ink() < beforeSweep, "the swept stroke is erased");
-  await button("Pen"); await matchesFullRepaint("the canvas after an eraser sweep equals a full repaint");
+  await button("画笔"); await matchesFullRepaint("the canvas after an eraser sweep equals a full repaint");
   group("repaint economy: eraser moves repaint at most once per frame and never over empty space");
 
   const inkBeforeHeld = await ink(), [hx, hy] = at(.45, .9);
   await page.mouse.move(hx, hy); await page.mouse.down(); await page.mouse.move(hx + 80, hy, { steps: 8 }); await page.mouse.up();
   assert.ok(await ink() > inkBeforeHeld, "the stroke to erase is drawn");
-  await button("Eraser"); await page.mouse.move(hx + 40, hy); await page.mouse.down(); await awaitFrame(); await awaitFrame();
+  await button("橡皮擦"); await page.mouse.move(hx + 40, hy); await page.mouse.down(); await awaitFrame(); await awaitFrame();
   assert.equal(await ink(), inkBeforeHeld, "a stationary eraser contact erases the stroke before any movement");
   await page.mouse.up(); assert.equal(await ink(), inkBeforeHeld, "releasing the stationary eraser keeps the stroke erased");
-  await button("Undo"); await button("Undo"); assert.equal(await ink(), inkBeforeHeld, "Undo restores the stroke, then removes it");
-  await button("Pen"); await matchesFullRepaint("the canvas after a stationary eraser equals a full repaint");
+  await button("撤销"); await button("撤销"); assert.equal(await ink(), inkBeforeHeld, "Undo restores the stroke, then removes it");
+  await button("画笔"); await matchesFullRepaint("the canvas after a stationary eraser equals a full repaint");
   group("repaint economy: a stationary eraser contact erases immediately");
 
   const inkOffset = () => run(() => {
@@ -791,17 +791,17 @@ try {
     return [minX / ratio - parseFloat(image.style.left), minY / ratio - parseFloat(image.style.top)];
   });
   const panOffset = await inkOffset(), [cx, cy] = at(.5, .5);
-  await button("Hand"); await page.mouse.move(cx, cy); await page.mouse.down(); economy = await counts();
+  await button("抓手"); await page.mouse.move(cx, cy); await page.mouse.down(); economy = await counts();
   for (let i = 1; i <= 60; i++) {
     await page.mouse.move(cx + 2 * i, cy + i); await awaitFrame();
     assert.deepEqual(await inkOffset(), panOffset, `ink and reference move together (move ${i})`);
   }
   const panned = await counts(); await page.mouse.up();
   assert.ok(panned.clears - economy.clears <= panned.frames - economy.frames + 1, `pan repaints ${panned.clears - economy.clears} within ${panned.frames - economy.frames} frames`);
-  await panBy(-120, -60); await button("Pen");
+  await panBy(-120, -60); await button("画笔");
   group("repaint economy: a pan repaints at most once per frame and never shows ink and reference at different offsets");
 
-  await button("Undo"); await matchesFullRepaint("Undo equals a full repaint");
+  await button("撤销"); await matchesFullRepaint("Undo equals a full repaint");
   let previousBackground = await bg(); await call("setTheme", "light");
   await page.waitForFunction(previous => document.querySelector(".drawing-pad-background")?.src !== previous, { timeout: 30000 }, previousBackground); await waitForSheet();
   await matchesFullRepaint("a theme change equals a full repaint");
@@ -812,15 +812,15 @@ try {
   await matchesFullRepaint("a resize equals a full repaint");
   await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
   await page.waitForFunction(() => document.querySelector(".drawing-pad-ink").width === document.querySelector(".drawing-pad-viewport").clientWidth);
-  await button("Clear"); await matchesFullRepaint("Clear equals a full repaint"); assert.equal(await ink(), 0);
+  await button("清空"); await matchesFullRepaint("Clear equals a full repaint"); assert.equal(await ink(), 0);
   group("repaint economy: Undo, theme change, resize and Clear leave the canvas equal to a full repaint");
 
   await stroke(); const beforeCulling = await canvasData(); economy = await counts();
-  await button("Hand"); for (let i = 0; i < 4; i++) await panBy(400, 0);
+  await button("抓手"); for (let i = 0; i < 4; i++) await panBy(400, 0);
   assert.equal(await ink(), 0, "the stroke is fully off-screen"); assert.ok((await counts()).clears > economy.clears);
   assert.ok(images(await call("submit", { accept: false }))[0], "off-screen ink is still exported");
   for (let i = 0; i < 4; i++) await panBy(-400, 0);
-  assert.equal(await canvasData(), beforeCulling, "panning back repaints culled ink exactly"); await button("Pen");
+  assert.equal(await canvasData(), beforeCulling, "panning back repaints culled ink exactly"); await button("画笔");
   group("repaint economy: off-screen strokes are skipped in full repaints, restored exactly, and still exported");
 
   // A DPR-only change need not notify the CSS ResizeObserver. Ordinary input
@@ -838,8 +838,8 @@ try {
   assert.equal((await counts()).clears, economy.clears, "normal strokes stay incremental at the new density");
   await matchesFullRepaint("DPR-only pen reconciliation equals a full repaint");
   await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 }); await awaitFrame(); await awaitFrame();
-  await button("Eraser"); assert.deepEqual(await density(), initialDensity, "a tool switch also reconciles a DPR-only decrease");
-  economy = await counts(); await button("Pen");
+  await button("橡皮擦"); assert.deepEqual(await density(), initialDensity, "a tool switch also reconciles a DPR-only decrease");
+  economy = await counts(); await button("画笔");
   assert.equal((await counts()).clears, economy.clears, "ordinary tool switches do not repaint unchanged ink");
   await matchesFullRepaint("DPR-only tool reconciliation equals a full repaint");
   group("DPR-only changes reconcile on ordinary pen/tool input without full per-stroke repainting");
@@ -878,13 +878,13 @@ try {
   await restoreInk(); await matchesFullRepaint("a stroke committed while lost is reconstructed on restore");
   group("context recovery: active and committed-while-lost pen strokes survive with exact pixels");
 
-  await button("Eraser"); const beforeRestoreErase = await ink();
+  await button("橡皮擦"); const beforeRestoreErase = await ink();
   await page.mouse.move(...at(.4, .725)); await page.mouse.down();
   await loseInk(); await restoreInk();
   assert.ok(await ink() < beforeRestoreErase, "restoration includes the held whole-stroke eraser preview");
-  await page.mouse.up(); await button("Pen"); await matchesFullRepaint("restored eraser preview commits exactly");
-  await loseInk(); await button("Hand"); await panBy(55, -35);
-  assert.equal(await ink(), 0); await restoreInk(); await button("Pen");
+  await page.mouse.up(); await button("画笔"); await matchesFullRepaint("restored eraser preview commits exactly");
+  await loseInk(); await button("抓手"); await panBy(55, -35);
+  assert.equal(await ink(), 0); await restoreInk(); await button("画笔");
   await matchesFullRepaint("camera changes during loss restore with the latest transform");
   group("context recovery: held eraser preview and a camera change restore the current display");
 
@@ -976,7 +976,7 @@ try {
   const themedPNG = images(await call("submit", { accept: false }))[0].data;
   await close(); await open(); assert.deepEqual(await refPosition(), themedPosition); assert.deepEqual(await inkGeometry(), themedGeometry);
   assert.equal(images(await call("submit", { accept: false }))[0].data, themedPNG);
-  await button("Undo"); assert.equal(await ink(), 0);
+  await button("撤销"); assert.equal(await ink(), 0);
   group("live mode/palette re-rasterization retains original Markdown, stroke geometry/Undo, pan, dimensions and coherent PNG colors");
   // DP-IR-1: change mode inside the backend pose await, then hold the new
   // reference render. The actual built exporter must not bypass that raster.

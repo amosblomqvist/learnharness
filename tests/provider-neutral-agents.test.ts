@@ -125,8 +125,8 @@ function assertSuccess(loop: Loop, run: Awaited<ReturnType<typeof runLoop>>) {
 	}
 	assert.deepEqual(run.renders, [loop === "visual" ? "svg" : "pdf:1"]);
 	assert.equal(run.usages.length, 3, "one usage callback per successful stream round");
-	assert.ok(run.activities.some((line) => line.startsWith(loop === "visual" ? "write_svg:" : "pdf_info:")));
-	assert.ok(run.activities.some((line) => line.startsWith(loop === "visual" ? "render_svg:" : "pdf_render:")));
+	assert.ok(run.activities.some((line) => line.startsWith(loop === "visual" ? "写入 SVG：" : "读取 PDF 信息：")));
+	assert.ok(run.activities.some((line) => line.startsWith(loop === "visual" ? "渲染图示：" : "渲染 PDF 页面：")));
 }
 
 // All global/env cases in this file are deliberately serial.

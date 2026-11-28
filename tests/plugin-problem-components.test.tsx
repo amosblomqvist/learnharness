@@ -148,7 +148,7 @@ test("practice dock orders statement/editor/thinking, submits separately and ret
   const field = document.querySelector('[data-testid="practice-thinking-field"]')!;
   const elements = Array.from(document.querySelectorAll("*"));
   assert.ok(elements.indexOf(document.querySelector("#code-editor")!) < elements.indexOf(field));
-  assert.equal(document.querySelector('[data-testid="practice-send"]')?.textContent?.trim(), "Submit");
+  assert.equal(document.querySelector('[data-testid="practice-send"]')?.textContent?.trim(), "提交");
   await f.submit();
   assert.deepEqual(f.state.inputs, [{ type: "plugin-problem-submission", problemId: "problem-one", occurrence, submission: "initial code", thinking: "original thinking" }]);
   assert.deepEqual(f.draft.submission, { status: "ready", value: "initial code" }); assert.equal(f.draft.thinking, "");
@@ -165,7 +165,7 @@ test("collapse and busy reconciliation preserve the current editor generation an
 
 test("missing/disabled renderer leaves the plugin problem unavailable with no native editor fallback", async () => {
   const f = await fixture({ missing: true });
-  assert.match(document.body.textContent ?? "", /Problem unavailable/); assert.doesNotMatch(document.body.textContent ?? "", /PRIVATE_SOLUTION/);
+  assert.match(document.body.textContent ?? "", /题目不可用/); assert.doesNotMatch(document.body.textContent ?? "", /PRIVATE_SOLUTION/);
   assert.equal(document.querySelector("#code-editor"), null); assert.ok(document.querySelector('[data-testid="practice-send"]')?.hasAttribute("disabled"));
   await f.submit(); assert.equal(f.state.inputs.length, 0); assert.equal(f.draft.thinking, "original thinking");
 });
@@ -278,7 +278,7 @@ test("sync and async submitted mount failures remove partial footer content and 
     await render(<PluginProblemSubmittedContent data={data} snapshot={snapshot} chatId="chat" registration={registration} />);
     assert.equal(context.signal.aborted, true);
     assert.equal(context.footerContainer!.isConnected, false);
-    assert.match(document.body.textContent!, /saved code|YOUR THINKING/);
+    assert.match(document.body.textContent!, /saved code|你的思考/);
     assert.doesNotMatch(document.body.textContent!, /partial footer|partial code|PRIVATE_SOLUTION/);
   }
 });

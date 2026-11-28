@@ -25,11 +25,12 @@ import { coverageOf } from "../core/coverage.ts";
 import type { ChatStore, GraphStore } from "../core/ports.ts";
 import type { ExtractionPipeline } from "../agent/subagents/extraction.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/settings.ts";
+import { tr } from "../core/i18n.ts";
 
 /** Distinguish a failed canonical save from later bookkeeping failures. */
 export class TurnPersistenceError extends Error {
 	constructor(cause: unknown) {
-		super("The reply could not be saved.", { cause });
+		super(tr("无法保存回复。", "The reply could not be saved."), { cause });
 		this.name = "TurnPersistenceError";
 	}
 }

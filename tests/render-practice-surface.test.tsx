@@ -52,10 +52,10 @@ describe("PracticeDock", () => {
 		assert.match(html, /Show that the sum is even\./);
 		// The 'Problem' eyebrow (owner round, 2026-10-05): the quiz cards'
 		// label row, mirrored — dock and transcript card read identically.
-		assert.match(html, /Problem/);
+		assert.match(html, /题目/);
 		// The measured column cap (the old fixed 40vh is only the fallback).
 		assert.match(html, /--dock-max-h/);
-		assert.match(html, /YOUR THINKING/);
+		assert.match(html, /你的思考/);
 		assert.match(html, /data-testid="practice-send"/);
 		assert.ok(!html.includes("practice-nudge") && !html.includes("practice-commit"), "the two-lane buttons are gone");
 		// The buttons carry their lane in the disabled gate; both start
@@ -94,7 +94,7 @@ describe("the practice transcript cards", () => {
 			/>,
 		);
 		assert.match(html, /data-testid="problem-card"/);
-		assert.match(html, /Problem/);
+		assert.match(html, /题目/);
 		assert.match(html, /Prove the parity claim\./);
 		assert.doesNotMatch(html, /Pair them\./, "the commitment stays hidden");
 		// No chevron, no collapsed bar (owner round, 2026-10-05).
@@ -112,12 +112,12 @@ describe("the practice transcript cards", () => {
 			/>,
 		);
 		assert.match(html, /data-testid="conclude-card"/);
-		assert.match(html, /Solved with hints/);
+		assert.match(html, /借助提示解决/);
 		assert.match(html, /Pair them; each pair is even\./, "the committed solution, verbatim");
-		assert.match(html, /Concluded/); // the plain eyebrow (owner round 3)
-		assert.match(html, /Solved/); // the outcome rides the quiz chip
-		assert.match(html, /Model solution/); // the labeled hero after the divider
-		assert.ok(html.indexOf("Solved") < html.indexOf("Model solution"), "chip at the top");
+		assert.match(html, /已结束/); // the plain eyebrow (owner round 3)
+		assert.match(html, /解决/); // the outcome rides the quiz chip
+		assert.match(html, /参考解答/); // the labeled hero after the divider
+		assert.ok(html.indexOf("解决") < html.indexOf("参考解答"), "chip at the top");
 		assert.match(html, /The pairing came after R2\./);
 		// VERDICT FIRST (owner round 3): verdict under the heading row, then
 		// the divider, then the labeled model solution.
@@ -149,7 +149,7 @@ describe("the practice transcript cards", () => {
 			/>,
 		);
 		assert.ok(html.includes('data-testid="metadata-toggle"'), "the trigger row");
-		assert.match(html, /Metadata/, "the label (CSS renders it mono-caps)");
+		assert.match(html, /元数据/, "the label (CSS renders it mono-caps)");
 		assert.ok(!html.includes('data-testid="metadata-box"'), "the info box is CLOSED until clicked — no rows in the markup");
 		assert.ok(!html.includes("border-t \"/>"), "no separate divider — the trigger just sits at the bottom");
 		// The open face (info-box rows at the model solution's 15px) is a
@@ -172,13 +172,13 @@ describe("the practice transcript cards", () => {
 		const html = renderToStaticMarkup(
 			<ConcludeCard part={part({ type: "tool-conclude", input: { outcome: "dismissed" } })} />,
 		);
-		assert.match(html, /Problem dismissed\./);
+		assert.match(html, /题目已忽略。/);
 		assert.doesNotMatch(html, /The solution/);
 	});
 
 	it("ThinkingCard: one label, right side, expanded arrival (owner round, 2026-10-07)", () => {
 		const trace = renderToStaticMarkup(<ThinkingCard data={{ problemCallId: "c", commit: false, text: "stuck at step two" }} />);
-		assert.match(trace, /YOUR THINKING/);
+		assert.match(trace, /你的思考/);
 		// Transcript rows arrive EXPANDED (clearly conveyed as sent) as
 		// full-width card-color bands with the 6px rail (the document,
 		// all-in — owner round two, 2026-10-07).
@@ -187,7 +187,7 @@ describe("the practice transcript cards", () => {
 		assert.ok(trace.includes("bg-card"), "the card-color band");
 		assert.ok(trace.includes("border-l-[calc(3ch-14px)]"), "narrow rail inside the 3ch inset");
 		const legacy = renderToStaticMarkup(<ThinkingCard data={{ problemCallId: "c", commit: true, text: "It is 42." }} />);
-		assert.match(legacy, /YOUR THINKING/);
+		assert.match(legacy, /你的思考/);
 		assert.doesNotMatch(legacy, /Your solution/);
 	});
 });
@@ -240,8 +240,8 @@ describe("GraphContextCard", () => {
 			], chains: ["Modus ponens → Soundness"] }} />,
 		);
 		assert.ok(html.includes('data-testid="graph-context-card"'));
-		assert.ok(html.includes("2 propositions"));
-		assert.ok(html.includes("1 chain"));
+		assert.ok(html.includes("2 个命题"));
+		assert.ok(html.includes("1 条推理链"));
 		// minimal: the collapsed bar carries NO statement text
 		assert.ok(!html.includes("If P implies Q"));
 		assert.ok(!html.includes("graph-context-body"));
@@ -251,8 +251,8 @@ describe("GraphContextCard", () => {
 		const html = renderToStaticMarkup(
 			<GraphContextCard data={{ propositions: [{ id: "n1", name: "A", statement: "S." }], chains: [] }} />,
 		);
-		assert.ok(html.includes("1 proposition</span>"));
-		assert.ok(!html.includes("chain"));
+		assert.ok(html.includes("1 个命题</span>"));
+		assert.ok(!html.includes("推理链"));
 	});
 
 	it("the marker projects to the card's part (projectView fold)", () => {

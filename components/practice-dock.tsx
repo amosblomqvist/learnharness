@@ -12,6 +12,7 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
 import type { PrepareThinkingSubmission } from "./plugin-submission-adapters";
 import { cn } from "@/lib/utils";
+import { tr } from "@/src/core";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -131,7 +132,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
-				<span className="font-medium">Problem</span>
+				<span className="font-medium">{tr("题目", "Problem")}</span>
 				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
@@ -147,7 +148,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 			    markdown + LaTeX rendered, capped by the measured column
 			    (--dock-max-h; the old fixed 40vh cut long problems short). */}
 			<div data-dock-scroll-area="" className="max-h-[var(--dock-max-h,40vh)] overflow-y-auto px-4 pt-3 pb-2">
-				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
+				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tr("题目", "Problem")}</div>
 				<div className="lh-prose text-[15px]">
 					<ToolContentResponse>{input.statement}</ToolContentResponse>
 				</div>
@@ -162,7 +163,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 				className="m-1.5 rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50"
 			>
 				<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					YOUR THINKING
+					{tr("你的思考", "YOUR THINKING")}
 				</div>
 				<PathInput
 					value={thinking}
@@ -188,7 +189,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 							submit();
 						}
 					}}
-					placeholder="Work here, think out loud."
+					placeholder={tr("在这里作答，把想法说出来。", "Work here, think out loud.")}
 					className={cn(
 						"field-sizing-content lh-input max-h-64 min-h-16 w-full resize-none bg-transparent px-2.5 pb-2 outline-none placeholder:text-muted-foreground",
 					)}
@@ -199,7 +200,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 				    field 10 − p-1 (4) = button 6. */}
 				<div className="flex items-center justify-between gap-2 p-1">
 					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+						{compactionRunning ? tr("正在压缩上下文…", "compacting session…") : tr("↵ 提交 · ⇧↵ 换行", "↵ submits · ⇧↵ newline")}
 					</span>
 					<Button
 						type="button"
@@ -208,7 +209,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>
-						{customInput ? "Submit" : "Submit thinking"}
+						{customInput ? tr("提交", "Submit") : tr("提交思考", "Submit thinking")}
 					</Button>
 				</div>
 			</div>

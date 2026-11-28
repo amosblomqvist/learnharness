@@ -11,6 +11,7 @@ import { accumulateJobUsage, piUsageToStep } from "../core/contracts/jobs.ts";
 import type { PiEngine } from "./models.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import { runSubagent } from "./subagents/pi-run.ts";
+import { tr } from "../core/i18n.ts";
 
 /** Host observability only: never project prompts, inputs, transcripts or results. */
 export type PluginWorkerActivityMetadata = Pick<PluginTaskRecord,
@@ -157,7 +158,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 		};
 		try {
 			if (disposed || terminal(t.record)) return;
-			commit(t, { ...t.record, status: "running", activity: "starting" });
+			commit(t, { ...t.record, status: "running", activity: tr("启动中", "starting") });
 			active();
 			const engine = await abortable(deps.engineFor(clone(t.record.model), t.record.purpose, clone(t.record.options)), t.controller.signal);
 			active();
@@ -182,7 +183,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 					catch (error) { active(); return { content: [{ type: "text", text: text(error) }], details: null, isError: true }; }
 					active();
 					if (!resultValidator.Check(result)) throw new Error("Result no longer satisfies its schema");
-					commit(t, { ...t.record, status: "succeeded", result, completedAt: new Date().toISOString(), activity: "result accepted" });
+					commit(t, { ...t.record, status: "succeeded", result, completedAt: new Date().toISOString(), activity: tr("结果已接受", "result accepted") });
 					return { content: [{ type: "text", text: "Task result accepted" }], details: null, terminate: true };
 				},
 			});
@@ -226,7 +227,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 							finish(t, "failed", { code: "run_error", message }); throw new Error(message);
 						}
 					} else if (event.type === "tool_execution_start") {
-						if (!terminal(t.record)) commit(t, { ...t.record, activity: `tool: ${event.toolName}` });
+						if (!terminal(t.record)) commit(t, { ...t.record, activity: tr(`工具：${event.toolName}`, `tool: ${event.toolName}`) });
 					} else if (event.type === "tool_execution_end") {
 						saveResult({ role: "toolResult", toolCallId: event.toolCallId, toolName: event.toolName, content: event.result.content ?? [], details: event.result.details,
 							usage: event.result.usage, isError: event.isError, ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }), timestamp: Date.now() });

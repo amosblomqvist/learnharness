@@ -9,6 +9,7 @@ import { formatTokens } from "@/components/usage-format";
 import { Hint } from "@/components/ui/hint";
 import { timeAgo } from "@/components/sidebar";
 import { resolveSettings } from "@/src/core";
+import { tr } from "@/src/core";
 
 /**
  * The extraction-coverage surfaces (extraction-UX redesign, owner-locked
@@ -191,17 +192,17 @@ export function CoverageMenuBody({
 			{busy ? (
 				<span className="flex items-center gap-1.5 text-muted-foreground" data-testid="ctx-coverage-running">
 					<span className="size-1.5 animate-pulse rounded-full bg-foreground/70" aria-hidden />
-					extracting…
+					{tr("提取中…", "extracting…")}
 				</span>
 			) : complete ? (
-				<span className="text-muted-foreground">fully extracted</span>
+				<span className="text-muted-foreground">{tr("已全部提取", "fully extracted")}</span>
 			) : (
 				<span className="flex flex-col">
 					<span className="tabular-nums text-foreground">
-						{formatTokens(coverage.uncoveredTokens)} tok uncovered
+						{tr(`${formatTokens(coverage.uncoveredTokens)} token 未覆盖`, `${formatTokens(coverage.uncoveredTokens)} tok uncovered`)}
 					</span>
 					<span className="tabular-nums text-muted-foreground">
-						{coverage.uncoveredCount} message{coverage.uncoveredCount === 1 ? "" : "s"} unextracted
+						{tr(`${coverage.uncoveredCount} 条消息未提取`, `${coverage.uncoveredCount} message${coverage.uncoveredCount === 1 ? "" : "s"} unextracted`)}
 					</span>
 				</span>
 			)}
@@ -212,7 +213,7 @@ export function CoverageMenuBody({
 				disabled={busy || complete}
 				className="flex items-center justify-center rounded-lg border px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
 			>
-				{busy ? "Running" : "Extract"}
+				{busy ? tr("运行中", "Running") : tr("提取", "Extract")}
 			</button>
 		</div>
 	);
@@ -303,7 +304,7 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 		<div ref={rootRef} className="lh-no-drag relative shrink-0">
 			<Hint
 				// Trimmed (owner, subtlety round 2026-09-25).
-				label="How much of this session isn't mapped yet"
+				label={tr("该会话中尚未映射到图谱的内容", "How much of this session isn't mapped yet")}
 				side="bottom"
 			>
 				<button
@@ -366,43 +367,43 @@ export function CoverageRingDetail({ coverage, chunkTokens }: { coverage: Sessio
 	return (
 		<>
 			<div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				Extraction coverage
+				{tr("提取覆盖率", "Extraction coverage")}
 			</div>
 			<div className="flex flex-col gap-1 text-muted-foreground">
 				<div className="flex justify-between gap-2">
-					<span>Uncovered</span>
+					<span>{tr("未覆盖", "Uncovered")}</span>
 					<span className="tabular-nums text-card-foreground">
-						{formatTokens(coverage.uncoveredTokens)} tokens
+						{formatTokens(coverage.uncoveredTokens)} {tr("token", "tokens")}
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Covered</span>
+					<span>{tr("已覆盖", "Covered")}</span>
 					<span className="tabular-nums text-card-foreground">
-						{formatTokens(coverage.coveredTokens)} tokens
+						{formatTokens(coverage.coveredTokens)} {tr("token", "tokens")}
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Messages</span>
+					<span>{tr("消息", "Messages")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{coverage.coveredCount} / {coverage.totalMessages}
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Chunk threshold</span>
+					<span>{tr("分块阈值", "Chunk threshold")}</span>
 					<span className="tabular-nums text-card-foreground">
-						{formatTokens(chunkTokens)} tokens
+						{formatTokens(chunkTokens)} {tr("token", "tokens")}
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Last extraction</span>
+					<span>{tr("上次提取", "Last extraction")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{coverage.lastFoldedAt ? timeAgo(coverage.lastFoldedAt) : "—"}
 					</span>
 				</div>
 				{coverage.running && (
 					<div className="flex justify-between gap-2" data-testid="coverage-ring-running">
-						<span>Status</span>
-						<span className="text-card-foreground">extracting…</span>
+						<span>{tr("状态", "Status")}</span>
+						<span className="text-card-foreground">{tr("提取中…", "extracting…")}</span>
 					</div>
 				)}
 			</div>

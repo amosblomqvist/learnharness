@@ -23,6 +23,7 @@ import { createClaudeCodeProvider } from "./claude-code/provider.ts";
 import { streamClaudeCode } from "./claude-code/stream.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
+import { tr } from "../core/i18n.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -197,7 +198,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 				// Pi retains the setup of an operation already in flight.
 				const current = piModels();
 				const currentModel = current.getModel(spec.provider, spec.id);
-				if (!currentModel) return lazyStream(requestModel, async () => { throw new Error("The selected custom model is unavailable."); });
+				if (!currentModel) return lazyStream(requestModel, async () => { throw new Error(tr("所选的自定义模型不可用。", "The selected custom model is unavailable.")); });
 				const currentLevel = thinkingPreference
 					? clampThinkingLevel(currentModel, thinkingPreference)
 					: defaultThinkingLevel(currentModel);

@@ -7,6 +7,7 @@ import { useNotifyHub } from "@/components/server-events";
 import { PluginFrontendManager, type PluginHost, type PluginMount, type PluginSnapshot } from "@/components/plugin-manager";
 import { createPluginUiStore, PluginUiHost } from "@/components/plugin-ui-host";
 import { BUILTIN_MERMAID_LANGUAGE, reservedToolRendererNames } from "@/components/plugin-renderers";
+import { tr } from "@/src/core";
 
 const EMPTY: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", conflicts: [], loading: true, refreshing: false };
 const emptySubscribe = () => () => {};
@@ -58,9 +59,9 @@ export async function importPluginModule(url: string): Promise<PluginFrontendMod
 			script.src = "/plugin-loader.js";
 			script.onload = () => {
 				if (window.__lhImportPlugin) resolve();
-				else reject(new Error("Plugin module loader did not initialize"));
+				else reject(new Error(tr("插件模块加载器未能初始化", "Plugin module loader did not initialize")));
 			};
-			script.onerror = () => { script.remove(); reject(new Error("Plugin module loader could not be loaded")); };
+			script.onerror = () => { script.remove(); reject(new Error(tr("无法加载插件模块加载器", "Plugin module loader could not be loaded"))); };
 			document.head.appendChild(script);
 		}).catch(error => { window.__lhPluginLoader = undefined; throw error; });
 		await window.__lhPluginLoader;
@@ -132,7 +133,7 @@ export function PluginMountPoint({ pluginId, mount, label }: { pluginId: string;
 		return manager.mount(pluginId, mount, container.current, setError);
 	}, [manager, pluginId, mount]);
 	return <>
-		{error && <p role="alert" className="px-3 py-2 text-xs text-destructive">{label}: {error}</p>}
+		{error && <p role="alert" className="px-3 py-2 text-xs text-destructive">{label}{tr("：", ": ")}{error}</p>}
 		<div ref={container} aria-label={label} className="flex min-h-0 min-w-0 flex-1 flex-col" />
 	</>;
 }

@@ -1,175 +1,175 @@
-# Flashcards: product vision
+# 闪卡：产品愿景
 
-**Status:** Native-first implementation authorized by the human. Keep v1 simple: one self-contained plugin package/local store, generation, library, and spaced review. No Anki integration. The plugin is also a reference consumer for improving the still-evolving host API: report awkward, hacky or disproportionate integration work rather than building a workaround.
+**状态：** 项目负责人已授权原生优先的实现。v1 保持简单：一个自包含的插件包/本地存储、生成、卡片库和间隔复习。不集成 Anki。该插件同时也是改进仍在演进中的宿主 API 的参考使用方：遇到别扭、取巧或与收益不成比例的集成工作时，应当报告出来，而不是构建变通方案。
 
-## Why this belongs in LearnHarness
+## 为什么它属于 LearnHarness
 
-LearnHarness aims to maximize real, usable understanding per unit of mental effort. The point is not to remove the learner's struggle with the material, but to remove the logistics around it.
+LearnHarness 的目标是让每一单位脑力投入换来尽可能多的真实、可用的理解。重点不是消除学习者与材料之间的挣扎，而是消除围绕这种挣扎的杂务。
 
-Teaching and recall solve different problems. A learner can follow a lesson, understand its reasoning, and still fail to bring the relevant fact to mind later. That does not make the understanding fake. Understanding a proposition and having it available in the situations where it is useful are different achievements.
+教学和回忆解决的是不同的问题。学习者可以跟上一节课、理解其中的推理，之后却仍然想不起相关的事实。这并不意味着理解是假的。理解一个命题，和在它有用的情境中能想起它，是两种不同的成就。
 
-Recall operates on cues: features of a situation that bring something to mind. Teaching initially gives a proposition a narrow set of cues, closely tied to the lesson. Practice broadens and strengthens that set.
+回忆依靠提示语起作用：提示语是情境中能让人想起某样东西的特征。教学最初只给一个命题一组狭窄的提示语，并且与那节课紧密相连。练习会拓宽并强化这组提示语。
 
-Flashcards provide a deliberately small part of that solidifying process: native, spaced fact recall drawn from the propositions already represented in LearnHarness. They do not replace teaching, reasoning practice, or the existing adaptive practice sessions. Nor does remembering an answer demonstrate that the learner understands the reasoning beneath it.
+闪卡只承担这一巩固过程中刻意保持很小的一部分：基于 LearnHarness 中已有命题的原生、间隔式事实回忆。它们不替代教学、推理练习或现有的自适应练习会话。记住一个答案也不能证明学习者理解了答案背后的推理。
 
-The native experience is the product. Anki export/import is deferred entirely; none belongs in version one.
+原生体验就是产品本身。Anki 导出/导入完全推迟；第一个版本中不包含任何这类功能。
 
-## The central model: proposition, cue, card
+## 核心模型：命题、提示语、卡片
 
-The hierarchy is:
+层级结构为：
 
-> Deck (source-based by default) → Proposition → Cue/card
+> 卡组（默认按来源划分）→ 命题 → 提示语/卡片
 
-The proposition is the knowledge target. Each cue is a different situation or demand that should bring that proposition to mind. Each cue corresponds to its own flashcard, containing just two content fields: **question** and **answer**.
+命题是知识目标。每条提示语代表一种不同的情境或需求，应当能让人想起该命题。每条提示语对应一张独立的闪卡，只包含两个内容字段：**问题** 和 **答案**。
 
-Both fields support the app's standard built-in rich rendering: Markdown, mathematical notation, syntax-highlighted code blocks, tables, callouts, Mermaid diagrams, and normal typography. Markdown image URLs are refused by the shared host pipeline; native image and SVG artifact cards are separate. Two fields does not mean plain-text-only fields. Reuse the host rendering stack through its supported static Markdown mount rather than copying private components, bundling another native renderer, or disguising flashcards as worker-result widgets.
+两个字段都支持应用标准的内置富文本渲染：Markdown、数学公式、语法高亮的代码块、表格、标注框、Mermaid 图表和常规排版。共享的宿主渲染管线会拒绝 Markdown 图片 URL；原生图片和 SVG 产物卡片是另外的东西。只有两个字段并不意味着只能是纯文本字段。应通过宿主受支持的静态 Markdown 挂载复用宿主的渲染栈，而不是复制私有组件、捆绑另一个原生渲染器，或把闪卡伪装成 worker 结果组件。
 
-The approved shared renderer displays static content without auxiliary copy/download/retry/expand/zoom/disclosure controls and without registered plugin code-block widgets. Ordinary links retain their normal behavior. The host implementation is verified and exposes a general static Markdown mount with standard update/disposal and per-mount cancellation. Question and answer rendering use that public contract.
+经批准的共享渲染器只显示静态内容，不带辅助的复制/下载/重试/展开/缩放/折叠控件，也不包含已注册的插件代码块组件。普通链接保留其常规行为。宿主实现已经过验证，并提供了一个通用的静态 Markdown 挂载，具备标准的更新/销毁和按挂载的取消机制。问题和答案的渲染都使用这一公开契约。
 
-This is not one card whose question randomly changes shape. Different cues are separate cards so their review outcomes can be distinguished. They share a proposition, not an identity.
+这不是一张问题形式随机变化的卡片。不同的提示语是不同的卡片，这样才能区分它们各自的复习结果。它们共享一个命题，而不是共享同一个身份。
 
-The generation principle is:
+生成原则是：
 
-> Search for different reasons the proposition would need to come to mind—not merely different ways to ask for it.
+> 去寻找需要想起这个命题的不同理由—而不仅仅是提问它的不同方式。
 
-Paraphrasing a question does not by itself create a useful new cue. Conversely, an answer need not repeat the proposition verbatim: it should answer the particular question accurately while exercising that proposition.
+仅仅换一种说法提问，本身并不能创造一条有用的新提示语。反过来，答案也不必逐字重复命题：它应当准确回答这个具体问题，同时运用到该命题。
 
-There is no fixed quota of cards per proposition and no mandatory cue taxonomy. Some propositions warrant several useful cues; some warrant fewer. When existing cards already cover the useful cues, generating zero additional cards is a valid result.
+每个命题没有固定的卡片配额，也没有强制的提示语分类体系。有些命题值得配几条有用的提示语，有些则少一些。当现有卡片已经覆盖了有用的提示语时，不再生成任何新卡片也是合理的结果。
 
-## First-version boundary: fact recall
+## 第一版的边界：事实回忆
 
-Version one exercises **one proposition at a time** through concise question-and-answer cards.
+第一版通过简洁的问答卡片 **一次只练习一个命题**。
 
-It does not introduce reasoning-chain cards, multi-step derivation exercises, sequence-construction cards, or agent-graded problems. Those possibilities are not rejected forever; they are outside this first version.
+它不引入推理链卡片、多步推导练习、序列构建卡片或由智能体评分的题目。这些可能性并非被永远否定；它们只是不在第一版的范围内。
 
-Reasoning chains still matter. The generator may see the reasoning context around a proposition so it can understand its meaning, assumptions, and uses. A chain's premises are jointly sufficient: context must not turn “A and B imply C” into the false claim “A alone implies C.”
+推理链仍然重要。生成器可以看到某个命题周围的推理上下文，从而理解它的含义、假设和用途。一条推理链的各个前提是共同充分的：上下文绝不能把“A 和 B 推出 C”变成错误的“仅 A 就推出 C”。
 
-The distinction is intentional: reasoning informs which fact-recall cards are sensible without turning the review interaction into a reasoning lesson.
+这种区分是有意的：推理用来判断哪些事实回忆卡片是合理的，而不会把复习交互变成一节推理课。
 
-## A library organized around the existing knowledge
+## 围绕现有知识组织的卡片库
 
-The library should feel like the reasoning-chains view: a compact, expandable, folder-like hierarchy rather than a flat pile of unrelated cards. Version one uses **flat decks, without subdecks**. Each deck expands to propositions, and each proposition expands to its cues/cards.
+卡片库给人的感觉应当像推理链视图：一个紧凑、可展开、类似文件夹的层级结构，而不是一堆互不相关卡片的平铺。第一版使用 **扁平卡组，没有子卡组**。每个卡组展开为命题，每个命题展开为它的提示语/卡片。
 
-Default decks correspond to teaching sources: teaching sessions or imported notes. A proposition's initial deck is determined by its birth source, the first surviving provenance source used by the graph's region grouping. Multiple generations from the same source accumulate in that source's deck rather than creating generation-specific decks.
+默认卡组对应教学来源：教学会话或导入的笔记。命题的初始卡组由它的诞生来源决定，即图谱按区域分组时所用的第一个仍然存在的出处来源。来自同一来源的多次生成会累积在该来源的卡组中，而不是为每次生成创建单独的卡组。
 
-Decks are **collections of references, not exclusive owners**. A proposition may belong to multiple decks, but it still has exactly one cue collection, FSRS state, and review history. Reviewing or editing it through one deck affects the same record visible through every other deck. The graph proposition's identity remains the anchor; membership never creates a copy.
+卡组是 **引用的集合，而不是独占的所有者**。一个命题可以属于多个卡组，但它仍然只有一个提示语集合、一份 FSRS 状态和一份复习历史。通过某个卡组复习或编辑它，会影响在其他所有卡组中看到的同一条记录。图谱命题的身份始终是锚点；归属关系绝不会创建副本。
 
-The learner can create custom decks and add or remove proposition memberships, allowing a large notes source to be split into useful study collections or several small sources to be combined. Each proposition must retain at least one deck membership. Removing its last membership, including through deck deletion, requires choosing another deck; deleting a collection does not delete its cards, schedule, or history. There is no automatic Unfiled deck in version one. These actions do not rewrite teaching-source provenance or reorganize the core graph. The deck/library tree belongs to the plugin; a general-purpose host tree API is not part of the selected scope.
+学习者可以创建自定义卡组，并添加或移除命题的归属，从而把一个大型笔记来源拆分成有用的学习集合，或把几个小来源合并在一起。每个命题必须至少保留一个卡组归属。移除它的最后一个归属（包括通过删除卡组）时，需要选择另一个卡组；删除一个集合不会删除其中的卡片、复习计划或历史。第一版没有自动的“未分类”（Unfiled）卡组。这些操作不会改写教学来源的出处，也不会重组核心图谱。卡组/卡片库树属于插件；通用的宿主树 API 不在本次选定的范围内。
 
-This source-based, shared-membership design supersedes the earlier generation-created decks, exclusive ownership, automatic moves, and nested-deck plan. Standard Anki has single-deck card ownership, so shared membership is an intentional native extension, not a claim of identical Anki deck semantics.
+这种按来源划分、共享归属的设计取代了之前的方案：由生成新建卡组、独占归属、自动移动和嵌套卡组。标准 Anki 中一张卡片只能属于一个卡组，因此共享归属是有意的原生扩展，并不声称与 Anki 的卡组语义完全一致。
 
-The learner can edit and delete generated cards in the library. Generation does not require a separate draft-approval stage: successful additions are available for review immediately.
+学习者可以在卡片库中编辑和删除生成的卡片。生成不需要单独的草稿审批阶段：成功添加的卡片立即可以复习。
 
-The plugin is named **Flashcards**, with plugin ID `flashcards`.
+该插件名为 **闪卡**（Flashcards），插件 ID 为 `flashcards`。
 
-Being an official plugin does not make its dependencies application-wide. Third-party feature dependencies belong in the plugin's own package manifest and lockfile and are bundled with its distribution, not added to LearnHarness's root dependencies or installed into the app at runtime. Host runtime capabilities and supported public APIs remain the boundary.
+作为官方插件，并不意味着它的依赖就属于整个应用。第三方功能依赖应放在插件自己的软件包清单和 lockfile 中，并随其发行包一起打包，而不是添加到 LearnHarness 的根依赖中，或在运行时安装到应用里。宿主的运行时能力和受支持的公开 API 始终是边界。
 
-## Generation is explicit, contextual, and additive
+## 生成是显式的、有上下文的、增量的
 
-The learner decides what enters the flashcard system. Version one has no automatic generation when a teaching session finishes or graph content appears.
+由学习者决定哪些内容进入闪卡系统。第一版在教学会话结束或图谱内容出现时都不会自动生成。
 
-Proposition/reasoning-chain selection reuses the **actual host chains view**, rather than a new picker implementation inside Flashcards. The interaction should mirror the new-practice selection bubble: open the full-view selector, select knowledge, then close it while retaining the selection in the plugin's workflow. It need not be embedded among other plugin controls or inherit the graph canvas's current selection.
+命题/推理链的选择复用 **真实的宿主推理链视图**，而不是在闪卡内部重新实现一个选择器。交互应当与新建练习时的选择气泡一致：打开全视图选择器，选择知识，然后关闭它，同时在插件的工作流中保留所选内容。它不必嵌入在其他插件控件之中，也不必继承图谱画布当前的选择。
 
-The existing source renaming, folder creation, and drag behavior in that host view are wanted and may remain available. They are intentional host source-management actions, distinct from plugin-owned deck moves. The shared selection experience is accessed through a supported host UI capability; Flashcards must not import or copy private host components.
+该宿主视图中现有的来源重命名、文件夹创建和拖拽行为是需要的，可以继续保留。它们是有意保留的宿主来源管理操作，与插件自有的卡组移动不同。共享的选择体验通过受支持的宿主 UI 能力访问；闪卡不得导入或复制宿主的私有组件。
 
-Generation receives the selected propositions, their immediate reasoning-chain neighborhood, and existing cards for those targets. Include every chain directly involving a target and preserve all of each chain's premises and conclusion. Do not recursively expand the graph or include full teaching transcripts in version one. Existing cards are important context: the task is to find useful missing cues, not regenerate a proposition's collection from scratch.
+生成会收到所选命题、它们直接相关的推理链邻域，以及这些目标已有的卡片。包含直接涉及某个目标的每一条推理链，并保留每条推理链的全部前提和结论。第一版不递归扩展图谱，也不包含完整的教学对话记录。已有卡片是重要的上下文：任务是找出缺失的有用提示语，而不是从头重新生成一个命题的集合。
 
-First generation assigns a proposition to its birth-source deck. Repeated generation adds useful missing cues in place; it does not create a new deck, move the proposition, or change its existing memberships.
+首次生成会把命题分配到它的诞生来源卡组。重复生成会就地添加缺失的有用提示语；它不会创建新卡组、移动该命题，也不会改变它已有的归属。
 
-Repeated generation preserves manual edits, existing cards, review history, and the proposition's schedule. It adds useful missing cards rather than replacing what is already there. The exact creation timing of initially needed source decks, including zero-card results and failed chunks, remains an implementation-plan decision.
+重复生成会保留手动编辑、已有卡片、复习历史和该命题的复习计划。它添加缺失的有用卡片，而不是替换已有的内容。初始所需的来源卡组究竟在何时创建（包括零卡片结果和失败分块的情况），仍由实现计划决定。
 
-Generation follows LearnHarness's current **cheap model slot** unless the learner has explicitly configured a plugin-specific model/thinking override. Clearing the override returns to following the slot. The slot is resolved when generation starts, not copied permanently into plugin settings. An unavailable or unconfigured model produces an explicit error, not a silent fallback.
+生成默认跟随 LearnHarness 当前的 **经济档位**，除非学习者显式配置了插件专用的模型/推理强度覆盖。清除覆盖后恢复跟随该槽位。该槽位在生成开始时解析，而不是被永久复制到插件设置中。模型不可用或未配置时会产生显式错误，而不是静默回退。
 
-The worker must be able to repair an invalid submission in the same conversation. A failed output validation is feedback for correction, not a reason to discard the context and start over. Runs are bounded, and failure to produce an accepted result must not be presented as successful generation.
+worker 必须能够在同一段对话中修复无效的提交。输出校验失败是用于纠正的反馈，而不是丢弃上下文、从头再来的理由。运行是有上限的，未能产出被接受的结果时，绝不能呈现为生成成功。
 
-Large selections are split into configurable chunks, initially targeting **4,000 estimated input tokens**. The budget concerns the assembled generation context, including reasoning and existing cards, not just the proposition statements. Each proposition has one owning chunk; its work is not split across competing workers. Independent chunks can execute in parallel through host-managed worker execution and shared request admission.
+大的选择会被拆分成可配置的分块，初始目标为 **4,000 个估算输入 token**。该预算针对的是组装后的生成上下文（包括推理和已有卡片），而不仅仅是命题陈述本身。每个命题只属于一个分块；它的工作不会被拆分给相互竞争的多个 worker。独立的分块可以通过宿主管理的 worker 执行和共享的请求准入机制并行执行。
 
-If one proposition's complete required context cannot fit the configured budget, preflight reports that explicitly before generation starts. The learner can increase the budget or reduce the selection. Do not silently drop premises, omit targets, or truncate existing cards to make the request fit.
+如果某个命题所需的完整上下文无法放进所配置的预算，预检会在生成开始之前明确报告这一点。学习者可以提高预算或缩小选择范围。不要为了让请求放得下而静默丢弃前提、省略目标或截断已有卡片。
 
-Version one allows **one active generation batch at a time**, with independent chunks within that batch running in parallel. Another generation request is explicitly blocked while the batch is active, rather than creating overlapping work.
+第一版 **同一时间只允许一个活跃的生成批次**，批次内的独立分块并行运行。批次活跃期间，新的生成请求会被明确阻止，而不是创建重叠的工作。
 
-Successful chunks are accepted independently and their cards become available without waiting for the whole batch. A failure in another chunk does not discard accepted work. Cancellation stops further additions without removing cards already accepted, and a batch with failures is visibly partial rather than reported as successful.
+成功的分块会被独立接受，其卡片无需等待整个批次完成即可使用。另一个分块的失败不会丢弃已被接受的工作。取消会停止后续的添加，但不会移除已被接受的卡片；含有失败的批次会明确显示为部分完成，而不是报告为成功。
 
-Exact packing, limits, and retry behavior still require an implementation plan. The vision does not imply unlimited parallelism, a competing plugin-local admission system, or automatic replay of interrupted work.
+具体的打包方式、限制和重试行为仍需要一份实现计划。本愿景并不意味着无限的并行度、一个与宿主竞争的插件本地准入系统，或自动重放被中断的工作。
 
-## Review: one cue, one proposition-level schedule
+## 复习：一条提示语，一个命题级的复习计划
 
-A review presents **one cue/card for a proposition**, not all its cues in succession.
+一次复习呈现 **某个命题的一条提示语/卡片**，而不是连续呈现它的所有提示语。
 
-The interaction is intentionally familiar and simple:
+交互有意保持熟悉而简单：
 
-1. Read the question and attempt recall.
-2. Reveal the answer.
-3. Self-rate with **Again**, **Hard**, **Good**, or **Easy**.
+1. 阅读问题并尝试回忆。
+2. 显示答案。
+3. 用 **重来**（Again）、**困难**（Hard）、**良好**（Good）或 **简单**（Easy）进行自评。
 
-There is no thinking field, typed answer requirement, or agent evaluation in this first version. This is a deliberate narrower interaction than LearnHarness's teaching and adaptive practice sessions.
+第一版没有思考输入框，不要求输入答案，也没有智能体评估。这是有意比 LearnHarness 的教学会话和自适应练习会话更窄的交互。
 
-New introductions are paced by an adjustable **per-deck** daily limit, initially **20 previously unreviewed propositions per deck per day**. This supersedes the earlier plugin-wide introduction limit. Due reviews are uncapped, including learning/relearning repetitions. The introduction count is per proposition, not per cue or presentation; it does not limit card generation, library browsing, or learning elsewhere in LearnHarness. A shared proposition is introduced only once globally, and that first introduction counts against **every deck containing it**, regardless of which deck was used for the review. It does not become new again when encountered through another deck. Only the deck being studied controls admission of a new proposition. A full or zero allowance in another containing deck does not block that introduction, but the introduction still counts there; a deck's count may therefore exceed its limit because of reviews through other decks.
+新内容的引入速度由可调整的 **每个卡组** 每日上限控制，初始为 **每个卡组每天 20 个此前未复习过的命题**。这取代了之前插件范围的引入上限。到期复习不设上限，包括学习/重新学习的重复。引入计数按命题计，而不是按提示语或呈现次数计；它不限制卡片生成、卡片库浏览或在 LearnHarness 其他地方的学习。一个共享的命题在全局只会被引入一次，而这次首次引入会计入 **包含它的每一个卡组**，无论复习时使用的是哪个卡组。通过另一个卡组遇到它时，它不会再次成为新命题。只有正在学习的卡组控制新命题的准入。另一个包含它的卡组额度已满或为零，并不会阻止这次引入，但这次引入仍会计入那个卡组；因此，一个卡组的计数可能因为通过其他卡组进行的复习而超过其上限。
 
-Normal review handles existing obligations before new introductions: ready learning/relearning steps first, then due reviews, then new propositions up to the applicable deck limit. A large overdue backlog therefore takes priority over new material.
+常规复习会先处理已有的待办，再引入新内容：先是已就绪的学习/重新学习步骤，然后是到期复习，最后是不超过相应卡组上限的新命题。因此，大量逾期积压会优先于新材料。
 
-The learner can review the whole library or narrow scheduled review to selected decks or propositions. Filtering does not create separate scheduling states or turn review into an early/cram mode.
+学习者可以复习整个卡片库，也可以把计划内的复习缩小到选定的卡组或命题。筛选不会创建单独的调度状态，也不会把复习变成提前复习/突击模式。
 
-There are no subdecks or parent-deck limits in version one. Adding nested organization later need not duplicate propositions or reset their schedules; its limit behavior would need its own design.
+第一版没有子卡组或父卡组上限。以后加入嵌套组织时不必复制命题或重置它们的复习计划；其上限行为需要单独设计。
 
-Scheduling uses **FSRS**, with one scheduling state per **proposition**, not per cue. The rating updates that proposition's schedule. This avoids treating each new cue as an entirely separate fact with its own independent review obligation.
+调度使用 **FSRS**，每个 **命题** 一份调度状态，而不是每条提示语一份。评分会更新该命题的复习计划。这样可以避免把每条新提示语都当作一个完全独立的事实，各自拥有独立的复习义务。
 
-The chosen algorithm reference is **FSRS-6**, pinned to the published `ts-fsrs@5.2.3` implementation. The scheduler will be implemented without a runtime scheduler dependency, retaining the reference's MIT attribution. Version one uses published default parameters; personalized parameter optimization is deferred. Review history is retained independently of that decision.
+选定的算法参考为 **FSRS-6**，固定为已发布的 `ts-fsrs@5.2.3` 实现。调度器将在不依赖运行时调度器库的情况下实现，并保留参考实现的 MIT 署名。第一版使用已发布的默认参数；个性化参数优化推迟。复习历史的保留与这一决定无关。
 
-Desired retention is one plugin-wide setting, initially **90%**, rather than a separate target or preset for each topic. Higher targets trade more frequent reviews for higher expected retention.
+目标记忆保持率是一个插件范围的设置，初始为 **90%**，而不是为每个主题分别设置目标或预设。更高的目标以更频繁的复习换取更高的预期记忆保持率。
 
-Short-term review uses Anki-style learning and relearning steps, initially **1 minute, then 10 minutes** for new propositions and **10 minutes** after a lapse. These steps are editable in the plugin's settings; version one does not rely on FSRS's experimental empty-steps mode for all short-term intervals.
+短期复习使用 Anki 风格的学习和重新学习步骤：新命题初始为 **1 分钟，然后 10 分钟**，遗忘后为 **10 分钟**。这些步骤可以在插件设置中编辑；第一版不依赖 FSRS 实验性的空步骤模式来处理所有短期间隔。
 
-This is an adaptation of Anki-style scheduling, not a claim of identical Anki behavior. Standard Anki schedules cards independently. Here, a proposition is scheduled while the cue used to test it can vary. A success on one cue is therefore not proof that every cue for that proposition is equally strong, and the standard scheduler's retention predictions are not a guarantee for this adapted setup.
+这是对 Anki 风格调度的改编，并不声称与 Anki 的行为完全一致。标准 Anki 独立调度每张卡片。而这里调度的是命题，用来测试它的提示语则可以变化。因此，在一条提示语上成功并不能证明该命题的每条提示语都同样牢固，标准调度器的记忆保持率预测也不能为这种改编后的设置提供保证。
 
-## Cue choice is a separate problem from scheduling
+## 选择提示语是与调度不同的问题
 
-When a proposition is due, the plugin chooses which of its cues to present.
+当一个命题到期时，由插件决定呈现它的哪一条提示语。
 
-Selection mixes untried and reviewed cues. Untried cues need opportunities to be exercised; weaker reviewed cues should be favored; stronger cues must remain eligible. Favoring weaker cues means **weighted choice**, not always selecting the single weakest cue.
+选择时会混合未尝试过和已复习过的提示语。未尝试过的提示语需要获得被练习的机会；较弱的已复习提示语应当被优先；较强的提示语也必须仍有机会被选中。优先较弱的提示语意味着 **加权选择**，而不是总是选择最弱的那一条。
 
-Cue-level outcomes are retained to inform this choice, even though the proposition owns the FSRS state. The separation is fundamental:
+即使 FSRS 状态归命题所有，也会保留提示语级别的结果，用于指导这一选择。这种分离是根本性的：
 
-- The proposition is the knowledge target and scheduling unit.
-- The cue/card supplies a retrieval route and has its own observed outcomes.
-- Review history records what was actually shown and how it was rated.
+- 命题是知识目标和调度单位。
+- 提示语/卡片提供一条提取路径，并有它自己观察到的结果。
+- 复习历史记录实际显示了什么以及如何评分。
 
-Version one's selection rule uses each reviewed cue's most recent rating, with relative weights **Again 4, Hard 3, Good 2, Easy 1**, and **3 for an untried cue**. A cue can therefore recover from an older failure rather than being permanently penalized by it. Full review history is still retained. These are explicit, simple selection heuristics, not FSRS parameters or a claim of optimal weighting.
+第一版的选择规则使用每条已复习提示语最近一次的评分，相对权重为 **重来 4、困难 3、良好 2、简单 1**，**未尝试的提示语为 3**。因此，一条提示语可以从较早的失败中恢复，而不会因此被永久惩罚。完整的复习历史仍会保留。这些是明确而简单的选择启发式规则，不是 FSRS 参数，也不声称是最优的加权方式。
 
-Learning and relearning repetitions keep the same cue until the proposition returns to normal review. A new weighted choice is made for the next normal review. This keeps an immediate repair focused on the retrieval route that needed work rather than switching away from it.
+学习和重新学习的重复会一直使用同一条提示语，直到该命题回到常规复习。下一次常规复习时再重新进行加权选择。这样，即时的补救就能集中在需要加强的那条提取路径上，而不是切换到别的路径。
 
-## Keep knowledge and learner evidence separate
+## 让知识与学习者证据保持分离
 
-LearnHarness's graph is an objective representation of propositions and their reasoning relationships. Presence in that graph is not evidence that the learner can recall a proposition, or that they have mastered it.
+LearnHarness 的图谱是命题及其推理关系的客观表示。某个命题出现在图谱中，并不能证明学习者能回忆起它，或已经掌握了它。
 
-The plugin reads that knowledge and owns its cards, scheduling state, and review history separately. It does not write mastery values, learner difficulty, or review results into the core graph. Creating a card does not create evidence of learning.
+插件读取这些知识，并单独拥有自己的卡片、调度状态和复习历史。它不会把掌握度、学习者难度或复习结果写入核心图谱。创建一张卡片并不构成学习的证据。
 
-The relationship is also non-destructive. If a card's proposition ID can no longer be found in the graph, its cards move to an **Archive** section outside normal review. The plugin retains its own content, proposition snapshots, and history. Deleting graph data never silently deletes plugin-owned data.
+这种关系也是非破坏性的。如果在图谱中再也找不到某张卡片的命题 ID，它的卡片会被移到常规复习之外的 **归档**（Archive）区域。插件会保留它自己的内容、命题快照和历史。删除图谱数据绝不会静默删除插件自有的数据。
 
-Deleting a reasoning chain alone does not archive cards when the proposition itself still exists. If an original source is deleted but the proposition survives through other provenance, preserve its existing deck memberships and retain the old source deck with its stored label. Do not automatically follow the graph's re-attributed birth source or reorganize custom collections. The live proposition remains eligible for review. Archive presentation and restoration details remain to be settled.
+仅删除一条推理链，在命题本身仍然存在时不会把卡片归档。如果原始来源被删除，但命题通过其他出处得以保留，则保留它已有的卡组归属，并以存储的标签保留旧的来源卡组。不要自动跟随图谱重新归属后的诞生来源，也不要重组自定义集合。仍然存在的命题依然可以参与复习。归档的展示和恢复细节有待确定。
 
-## Deferred Anki integration
+## 推迟的 Anki 集成
 
-The human removed all Anki integration from v1. There is no export/import UI, packaging library, SQLite WASM asset, converter or Anki-specific verification requirement. Revisit integration only if requested after the native plugin is useful.
+项目负责人已从 v1 中移除了所有 Anki 集成。没有导出/导入 UI、打包库、SQLite WASM 资源、转换器或 Anki 专用的验证要求。只有在原生插件变得有用之后、且有人提出要求时，才重新考虑集成。
 
-## What this first version should make possible
+## 第一版应当实现的目标
 
-The learner can select knowledge they care about, generate genuinely different fact-retrieval cues without managing prompts, and maintain those cues in a familiar hierarchy. They can return for a straightforward spaced-review session without a model call at every answer. Their work remains native to LearnHarness, without an integration dependency on another application.
+学习者可以选择自己关心的知识，无需管理提示词就能生成真正不同的事实提取提示语，并在熟悉的层级结构中维护这些提示语。他们可以回来进行一次简单直接的间隔复习，而不必每回答一次就调用一次模型。他们的成果始终原生地保存在 LearnHarness 中，不依赖与其他应用的集成。
 
-The success criterion is useful availability of known facts—not card count, duplicated paraphrases, or a mastery label inferred from the graph. The plugin should spend the learner's effort on attempted recall and keep everything around that interaction as bare-bones as possible.
+成功的标准是已知事实能够有用地被想起—而不是卡片数量、重复的换种说法，或从图谱推断出来的掌握度标签。插件应当把学习者的精力花在尝试回忆上，并让围绕这一交互的一切都尽可能精简。
 
-## Implementation notes
+## 实现说明
 
-The human authorized beginning implementation rather than further exhaustive planning. Use a simple native implementation; bring consequential new ambiguities or genuine infrastructure friction back to the human as they arise. The earlier detailed draft is not blanket approval for its proposed machinery. The following historical checklist is context, not a prerequisite to more planning:
+项目负责人已授权开始实现，而不是继续进行详尽的规划。使用简单的原生实现；出现重要的新歧义或真正的基础设施摩擦时，及时提交给项目负责人。之前那份详细草案并不代表对其提出的机制的全面批准。以下历史检查清单仅作为背景，而不是进一步规划的前提：
 
-- **Scheduling policy:** retention/step-setting bounds and change behavior; interval randomization and day-boundary behavior; ordering within due/new queues; membership changes after an introduction and whole-library/multi-deck review.
-- **Generation contract:** exact prompt and result schema; token estimation and packing; output/repair budgets and task limits.
-- **Batch lifecycle:** retries, interrupted work, detailed progress/cancellation interactions, and the creation timing of initially needed source decks. Shared request admission is provided by the host, not a separate plugin concurrency setting.
-- **Product UI:** concrete plugin-owned deck/library/review layouts and controls; custom-deck naming/deletion and membership-editing controls; card editing/deletion; archive restoration; and progress/error presentation. Use the verified shared Markdown renderer for card content.
-- **Delivery:** plugin source/build/distribution location and the coherent implementation and verification plan.
+- **调度策略：** 记忆保持率/步骤设置的边界和变更行为；间隔随机化和日边界行为；到期/新命题队列内的排序；引入之后的归属变更，以及整个卡片库/多卡组的复习。
+- **生成契约：** 确切的提示词和结果 schema；token 估算和打包；输出/修复预算和任务限制。
+- **批次生命周期：** 重试、被中断的工作、详细的进度/取消交互，以及初始所需来源卡组的创建时机。共享的请求准入由宿主提供，而不是单独的插件并发设置。
+- **产品 UI：** 具体的插件自有卡组/卡片库/复习布局和控件；自定义卡组的命名/删除和归属编辑控件；卡片编辑/删除；归档恢复；以及进度/错误的展示。卡片内容使用经过验证的共享 Markdown 渲染器。
+- **交付：** 插件源码/构建/发行的位置，以及连贯的实现和验证计划。
 
-Resolving these must preserve the distinctions that motivate the plugin: understanding versus availability, propositions versus cues, scheduling versus cue choice, objective knowledge versus learner evidence, and product functionality versus unnecessary integration machinery.
+解决这些问题时，必须保留促成该插件的那些区分：理解与可及性、命题与提示语、调度与提示语选择、客观知识与学习者证据，以及产品功能与不必要的集成机制。
 
-## Conceptual foundations
+## 概念基础
 
-This vision applies the teaching/practice/world-model distinction articulated in the human's *How I Learn Difficult Things With AI* and *The learning harness — canonical articulation* (2026-10-05), together with the subsequent direct product decisions for Flashcards. It is intentionally narrower than the broader assessment-and-adaptive-practice direction described there.
+本愿景应用了项目负责人在 *How I Learn Difficult Things With AI* 和 *The learning harness — canonical articulation*（2026-10-05）中阐述的教学/练习/世界模型区分，以及随后针对闪卡做出的直接产品决策。它有意比其中描述的更广泛的评估与自适应练习方向更窄。

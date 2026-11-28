@@ -1,57 +1,57 @@
-# Contributing to LearnHarness
+# 为 LearnHarness 做贡献
 
-Bug reports, focused fixes, documentation, reviews, and testing are welcome. LearnHarness is a maintainer-led project with a deliberate core learning experience.
+欢迎提交缺陷报告、聚焦的修复、文档、代码审查和测试。LearnHarness 是一个由维护者主导的项目，其核心学习体验是经过深思熟虑设计的。
 
-## Project direction
+## 项目方向
 
-Discuss meaningful changes to the project’s vision, teaching methodology, agent behavior, core architecture, or major workflows with maintainers **before implementation**. New features, integrations, and storage-format changes also need discussion first.
+对于项目愿景、教学方法、智能体行为、核心架构或主要工作流程的重大改动，请**在动手实现之前**先与维护者讨论。新功能、集成以及存储格式的改动也需要先讨论。
 
-A fix restores intended behavior; changing what the intended behavior should be is a design proposal. If that behavior is unclear, discuss it first. A fix that requires major architectural or storage changes still needs agreement on the approach.
+修复是恢复预期行为；而改变预期行为本身应该是什么，则属于设计提案。如果预期行为不明确，请先讨论。需要大幅改动架构或存储的修复，仍然需要先就实现方式达成一致。
 
-Plugins are the intended home for optional capabilities that do not belong in core. The plugin infrastructure is still under development, so discuss the use case rather than assuming a stable extension point exists.
+对于不属于核心的可选功能，插件是它们的预定归宿。插件基础设施仍在开发中，因此请讨论具体用例，而不要假定已经存在稳定的扩展点。
 
-## Before starting
+## 开始之前
 
-Check existing issues, PRs, and the [public work board](https://github.com/users/amosblomqvist/projects/2) for related work. **In progress** means someone is already working on the problem; coordinate before starting a parallel implementation. A board item is not, by itself, agreement to implement a proposal.
+请先查看现有的 issue、PR 和[公开工作看板](https://github.com/users/amosblomqvist/projects/2)，了解相关工作。**In progress**（进行中）表示已经有人在处理该问题；在开始并行实现之前请先协调。看板上的条目本身并不代表同意实现某项提案。
 
-- [Issues](https://github.com/amosblomqvist/learnharness/issues): concrete bugs and agreed implementation work.
-- [Discussions](https://github.com/amosblomqvist/learnharness/discussions): feature ideas and substantial design proposals. Explain the problem, proposed behavior, and relevant alternatives.
-- [Discord](https://discord.gg/5tCHHQEB2e): quick questions and conversation. Record actionable proposals and decisions on GitHub so others can find the context.
+- [Issues](https://github.com/amosblomqvist/learnharness/issues)：具体的缺陷和已达成一致的实现工作。
+- [Discussions](https://github.com/amosblomqvist/learnharness/discussions)：功能想法和较大的设计提案。请说明问题、提议的行为以及相关的替代方案。
+- [Discord](https://discord.gg/5tCHHQEB2e)：快速提问和交流。可付诸行动的提案和决定请记录在 GitHub 上，以便他人找到相关背景。
 
-## Pull requests
+## Pull request
 
-**Keep each PR focused on one coherent problem.** Include the tests and documentation needed for that change, but leave unrelated fixes, refactors, dependency updates, and formatting changes for separate PRs. Follow the existing architecture and conventions.
+**每个 PR 只聚焦于一个连贯的问题**。请包含该改动所需的测试和文档，但把无关的修复、重构、依赖更新和格式调整留给单独的 PR。请遵循现有的架构和约定。
 
-Use **clear, precise, concise language**. Explain:
+请使用**清晰、准确、简洁的语言**。说明：
 
-- The problem, with a link to the relevant issue or discussion if one exists.
-- What changed and why it addresses the problem.
-- How you verified it, including important limitations and anything untested.
+- 问题是什么；如有相关的 issue 或 discussion，请附上链接。
+- 改了什么，以及为什么这样改能解决问题。
+- 你是如何验证的，包括重要的局限以及任何未经测试的部分。
 
-Avoid unnecessary jargon, lengthy boilerplate, and unsupported claims. Distinguish observed behavior from hypotheses.
+避免不必要的行话、冗长的套话和缺乏依据的断言。请区分观察到的行为与推测。
 
-We judge contributions by their results, not the tools used to produce them. AI-assisted and manually written contributions follow the same standards; disclosure of AI assistance is not required. You are responsible for the accuracy of the description, implementation, tests, and documentation.
+我们根据贡献的成果来评判，而不是根据产出它所用的工具。AI 辅助编写和手动编写的贡献遵循相同的标准；不要求披露是否使用了 AI 辅助。你需要对描述、实现、测试和文档的准确性负责。
 
-### Verification
+### 验证
 
-Run relevant checks and add regression coverage where useful. Briefly describe what you actually tested and any important limitations—for example, whether you used a real provider or mocked responses.
+请运行相关检查，并在有用时补充回归测试覆盖。简要说明你实际测试了什么以及任何重要的局限—例如，你使用的是真实的服务商还是模拟的响应。
 
-See the [development guide](docs/development.md) for setup and check commands, and the [architecture reference](docs/architecture.md) for runtime boundaries.
+环境搭建和检查命令请参阅[开发指南](docs/development.md)，运行时边界请参阅[架构参考](docs/architecture.md)。
 
-## Bug reports
+## 缺陷报告
 
-Include the app version and relevant environment, what you did, what you expected, and what happened. Add the provider/model when relevant and a minimal example, screenshot, or redacted error if possible. Note whether the problem repeats and any workaround you found. You do not need to know the root cause.
+请包含应用版本和相关环境、你做了什么、你预期发生什么，以及实际发生了什么。相关时请注明服务商/模型，并尽可能附上最小示例、截图或脱敏后的错误信息。请说明问题是否可复现，以及你找到的任何临时解决办法。你不需要知道根本原因。
 
-Do not publish credentials, tokens, private learning records, or private course materials—or use them as test fixtures. Prefer synthetic or shareable examples.
+不要公开凭据、token、私人学习记录或私人课程资料—也不要把它们用作测试数据。请优先使用合成的或可公开分享的示例。
 
-## Review and credit
+## 审查与署名
 
-Maintainers decide project direction and what is accepted. Review may lead to revisions, narrower scope, further discussion, or a decision not to proceed. Passing tests does not, by itself, establish that a proposed behavior belongs in the product.
+维护者决定项目方向以及接受哪些内容。审查可能导致修改、缩小范围、进一步讨论，或决定不再推进。测试通过本身并不能证明所提议的行为应当纳入产品。
 
-Where suitable, we build on contributors’ implementations and work through revisions with their authors. We may integrate a contribution with finishing changes while preserving authorship and appropriate credit; adopting part of a PR is not acceptance of the whole proposal.
+在合适的情况下，我们会在贡献者的实现基础上继续推进，并与作者一起完成修改。我们可能会在保留作者身份和适当署名的前提下，对贡献做收尾修改后再合入；采纳 PR 的一部分并不代表接受整个提案。
 
-A PR does not guarantee acceptance or inclusion in a particular release. Integration and publication are separate; consult the [work board](https://github.com/users/amosblomqvist/projects/2) and [releases](https://github.com/amosblomqvist/learnharness/releases) for current status.
+提交 PR 并不保证会被接受，也不保证会被纳入某个特定版本。合入与发布是两回事；当前状态请查看[工作看板](https://github.com/users/amosblomqvist/projects/2)和[版本发布](https://github.com/amosblomqvist/learnharness/releases)。
 
-**Interested in contributing regularly?** If you’d like to help maintain LearnHarness, review and finish fixes, or support other contributors, email me at [contribute@learnharness.ai](mailto:contribute@learnharness.ai). Tell me a little about your interests and how you’d like to help.
+**有兴趣长期参与贡献吗**？如果你愿意帮助维护 LearnHarness、审查并完善修复，或者支持其他贡献者，请发邮件到 [contribute@learnharness.ai](mailto:contribute@learnharness.ai)。简单介绍一下你的兴趣以及你希望如何提供帮助。
 
-LearnHarness is licensed under [AGPL-3.0](LICENSE).
+LearnHarness 采用 [AGPL-3.0](LICENSE) 许可证。

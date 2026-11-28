@@ -1,26 +1,16 @@
-# Plugin question tools — API v1 contract
+# 插件问题工具——API v1 契约
 
-Custom teaching questions share the native question lifecycle. This contract describes
-the matching source/build. Match the target app using the downloaded skill's `bundle.json`;
-API v1 alone does not identify every available capability. Exact types live in
-`src/core/plugin-questions.ts` and the matching type-only SDK. For practice, use the
-separate [problem contract](plugin-problem-contract.md), not teaching enrollment.
+自定义教学问题与原生问题共享同一生命周期。本契约描述对应的源码/构建。用下载的 skill 中的 `bundle.json` 匹配目标应用；仅凭 API v1 无法确定所有可用能力。确切类型位于 `src/core/plugin-questions.ts` 和对应的纯类型 SDK 中。练习场景请使用单独的[题目契约](plugin-problem-contract.md)，而不是教学注册。
 
-## 1. Scope and ownership
+## 1. 范围与归属
 
-The host owns canonical identity, saved contracts, validation/persistence/continuation,
-question cards/dock, fold/reveal, submission/dismissal, session stats, microphone/model
-controls, optional thinking and check reading-thinking, and probe/teach positioning.
-The plugin owns payload/answer schemas, optional presentation, the answer editor,
-instructions for using its format, and optional generic grading/result presentation.
+宿主负责权威身份、已保存的契约、校验/持久化/继续、问题卡片/停靠区、折叠/揭晓、提交/关闭、会话统计、麦克风/模型控件、可选的思考和检查（check）时的阅读思考，以及摸底/教学中的定位。插件负责载荷/回答 schema、可选的呈现、回答编辑器、关于如何使用其格式的说明，以及可选的通用评分/结果呈现。
 
-This is not a generic pending-input/forms framework, host code-editor catalogue,
-persistent editor-draft format, core chat migration hook or replacement for builtin
-question grading. The ordinary teacher reviews the saved answer and any observations.
+这不是一个通用的待处理输入/表单框架、宿主代码编辑器目录、持久化的编辑器草稿格式、核心聊天迁移钩子，也不是内置问题评分的替代品。普通的老师会审阅已保存的回答及任何观察结果。
 
-## 2. Backend registration
+## 2. 后端注册
 
-`ctx.registerQuestionType(definition)` returns an unregister function:
+`ctx.registerQuestionType(definition)` 返回一个注销函数：
 
 ```ts
 {
@@ -39,226 +29,97 @@ question grading. The ordinary teacher reviews the saved answer and any observat
 }
 ```
 
-`Q`/`A` denote schema-inferred payload/answer values. Type IDs use `[A-Za-z0-9_-]`,
-1–128 characters; labels/descriptions must contain non-whitespace text. Contract versions
-are positive safe integers, independent of package version. `showThinking` is required
-plugin policy, not model-authored. At least one variant is required: probe contributes
-only to prober, teach only to teacher; no practice enrollment is implied.
+`Q`/`A` 表示由 schema 推断出的载荷/回答值。类型 ID 使用 `[A-Za-z0-9_-]`，长度 1–128 个字符；标签/描述必须包含非空白文本。契约版本是正的安全整数，与包版本无关。`showThinking` 是必填的插件策略，不由模型编写。至少需要一个变体：probe 只提供给摸底，teach 只提供给老师；不隐含任何练习注册。
 
-The host builds native posing tools, not plugin `execute` handlers. Names follow native
-tool admission rules. Ordinary tools, questions, problems and instructions from a package
-are admitted atomically from one per-turn contribution snapshot. Never invoke a factory
-again to reconstruct authority.
+宿主构建原生出题工具，而不是插件的 `execute` 处理函数。工具名遵循原生工具准入规则。同一个包中的普通工具、问题、题目和说明基于每回合的一份贡献快照原子地准入。永远不要再次调用工厂函数来重建权威。
 
-Native parameters are `{question: string, payload: Q}` for probe and
-`{type: "predict" | "check", nodeId: string, question: string, payload: Q}` for teach.
-Common fields cannot collide with payload fields. `question` is non-whitespace
-learner-visible Markdown preserved as authored, providing a safe teaser/fallback.
-Teach node IDs must be applicable live plan nodes; existing predict/check pacing applies.
+probe 的原生参数为 `{question: string, payload: Q}`，teach 的原生参数为 `{type: "predict" | "check", nodeId: string, question: string, payload: Q}`。公共字段不能与载荷字段冲突。`question` 是非空白的、学习者可见的 Markdown，按编写原样保留，作为安全的预告/回退内容。teach 的节点 ID 必须是适用的、当前学习计划中存在的节点；沿用现有的 predict/check 节奏规则。
 
-Optional side-effect-free synchronous refinements receive immutable context:
-`validateQuestion({chatId,variant,contractVersion,input})` and
-`validateAnswer({chatId,questionId,variant,contractVersion,input,answer})`.
-Return `undefined`/`[]` or readable error strings. Async/thenable validation is refused.
-Authoring errors do not pose a question; answer errors preserve pending input/drafts.
-A schema-valid but incorrect answer is not a validation failure.
+可选的、无副作用的同步细化校验接收不可变的上下文：`validateQuestion({chatId,variant,contractVersion,input})` 和 `validateAnswer({chatId,questionId,variant,contractVersion,input,answer})`。返回 `undefined`/`[]` 或可读的错误字符串。异步/thenable 校验会被拒绝。编写错误不会出题；回答错误会保留待处理的输入/草稿。符合 schema 但不正确的回答不属于校验失败。
 
-## 3. Schema and JSON boundary
+## 3. Schema 与 JSON 边界
 
-Use self-contained persistable schemas supported by the installed TypeBox compiler.
-Compile the plain persisted representation, preserving local JSON Pointer reference
-meaning when embedding payloads. Reject external references, `$id`/anchor/dynamic
-resolution, runtime-dependent functions/RegExp/validation objects, non-JSON extensions
-and unsupported formats. Descriptive TypeBox branding is not persisted validation.
-This is bounded schema hygiene, not full JSON Schema meta-validation.
+使用已安装的 TypeBox 编译器支持的、自包含且可持久化的 schema。编译纯持久化表示，嵌入载荷时保留本地 JSON Pointer 引用的含义。拒绝外部引用、`$id`/锚点/动态解析、依赖运行时的函数/RegExp/校验对象、非 JSON 扩展以及不受支持的格式。描述性的 TypeBox 品牌标记不属于持久化校验。这是有界的 schema 规范检查，而不是完整的 JSON Schema 元校验。
 
-Values are finite JSON: strings, finite numbers, booleans, null, arrays and plain objects.
-Do not convert, clean, trim, truthiness-filter or silently omit values. Preserve raw code
-whitespace and valid `false`, `0`, `null`, empty strings/arrays exactly.
+值是有限 JSON：字符串、有限数字、布尔值、null、数组和普通对象。不要对值做转换、清理、去除首尾空白、按真值过滤或静默省略。完全保留原始代码中的空白，以及有效的 `false`、`0`、`null`、空字符串/空数组。
 
-## 4. Durable authority and stream presentation
+## 4. 持久权威与流式呈现
 
-A frozen accepted per-turn registry plus host pose ledger attest successful execution.
-Only a successful host pose creates pending authority: raw arguments, tool-name
-coincidence or arbitrary result tokens do not. Immutable snapshots bind host-minted
-question ID, exact call occurrence, owner/type/label/version/variant, validated input,
-schemas, `showThinking`, refinement and grading requirements, and teach role/node.
+一份冻结的、已受理的每回合注册表加上宿主的出题账本，共同证明执行成功。只有宿主成功出题才会创建待处理权威：原始参数、工具名巧合或任意结果令牌都不会。不可变快照绑定宿主生成的问题 ID、确切的调用出现位置（occurrence）、所有者/类型/标签/版本/变体、已校验的输入、schema、`showThinking`、细化校验与评分要求，以及 teach 的角色/节点。
 
-App-only `lhQuestions` metadata is indexed by assistant content position. Attempt
-annotations carry visibility facts but no pending authority. Ungraded snapshots use
-local protocol v1; graded ones use v2 with `requiresGrading: true` (section 6).
+仅限应用的 `lhQuestions` 元数据按助手内容位置建立索引。尝试注解携带可见性事实，但不携带待处理权威。不评分的快照使用本地协议 v1；需要评分的快照使用 v2，并带有 `requiresGrading: true`（见第 6 节）。
 
-A successful pose ends the native run using a temporary engine acknowledgement, not a
-learner answer. Suppress only ledger-attested temporary acks across stream/settlement
-carriers; retain errors/ordinary sibling results. Correlate original events before wire
-filtering. A successful pose stops mixed batches even when another question attempt fails.
+成功出题会以一个临时的引擎确认回执结束原生运行，它不是学习者的回答。在流/结算载体中只抑制经账本证明的临时确认回执；保留错误和普通的同级结果。在线路过滤之前关联原始事件。即使另一个问题尝试失败，成功出题也会终止混合批次。
 
-Question attempts never fall into the generic raw-input trace, including failed/live/
-interrupted attempts and missing renderers. Decorate outgoing assistant snapshot copies
-at message start/update/end after subscription admission and ID remapping, before renderer
-selection; never mutate shared native objects. Persist unsuccessful attempt classification
-separately. Failed attempts show safe host status, not raw errors quoting private payloads.
-Fallback uses common `question`, not a payload dump. This presentation boundary is not an
-OS/browser sandbox or a promise that authored prose cannot contain an answer.
+问题尝试永远不会落入通用的原始输入追踪，包括失败的/进行中的/被中断的尝试以及缺少渲染器的情况。在订阅准入和 ID 重映射之后、选择渲染器之前，于消息开始/更新/结束时修饰发出的助手快照副本；永远不要修改共享的原生对象。将未成功尝试的分类单独持久化。失败的尝试显示安全的宿主状态，而不是引用私有载荷的原始错误。回退使用公共的 `question`，而不是转储载荷。这一呈现边界不是操作系统/浏览器沙箱，也不保证编写的文字中不会包含答案。
 
-Strip app-only metadata from model messages. Never rewrite historical calls or allow
-plugin callbacks to migrate core chat records.
+从模型消息中剥离仅限应用的元数据。永远不要改写历史调用，也不允许插件回调迁移核心聊天记录。
 
-## 5. Canonical adoption, submission and compatibility
+## 5. 权威采纳、提交与兼容性
 
-Mount actionable editors only after canonical persistence/client adoption. Live attempts
-may show non-actionable placeholders. After stream termination explicitly reconcile;
-a failed read stays gated with reconciliation-only Retry, never another teacher turn.
-Connection-generation/epoch/ticket fences reject detached completions. Reconnecting the
-same occurrence must start/join a current task, not reuse obsolete readiness.
+只有在权威持久化/客户端采纳之后才挂载可操作的编辑器。进行中的尝试可以显示不可操作的占位内容。流终止后显式地重新同步；读取失败时保持受限状态，只提供仅用于同步的重试，永远不会触发另一个老师回合。连接代次/纪元/票据围栏会拒绝已脱离的完成结果。重新连接同一出现位置时必须启动/加入当前任务，而不是复用已过时的就绪状态。
 
-Submission binds stable question ID **and exact occurrence**, not only call ID. Pending
-plugin questions cannot be bypassed by ordinary text/Continue/Retry or legacy builtin
-answer/dismiss paths. Session settings/model changes remain possible.
+提交绑定稳定的问题 ID **和确切的出现位置**，而不仅是调用 ID。待处理的插件问题不能通过普通文本/继续/重试或旧的内置回答/关闭路径绕过。会话设置/模型仍可更改。
 
-The host latches one attempt, finishes dictation, awaits editor transcript publication,
-rechecks occurrence/mount/readiness, resolves saved canonical schemas, validates/refines,
-optionally grades, saves the genuine native result, then follows existing sibling/owed-turn
-continuation rules. Duplicate/stale attempts cannot save another answer or launch extra work.
-New hooks never retroactively change old saved acceptance requirements.
+宿主锁定一次尝试，完成语音听写，等待编辑器发布听写文本，重新检查出现位置/挂载/就绪状态，解析已保存的权威 schema，执行校验/细化校验，可选地评分，保存真实的原生结果，然后遵循现有的同级/欠回合继续规则。重复/过期的尝试不能再保存另一个回答或启动额外的工作。新增钩子永远不会追溯性地改变旧的已保存受理要求。
 
-Compatibility is explicit:
+兼容性是显式的：
 
-- The current backend supports its exact `contractVersion`. Saved schemas still govern.
-  Package revision/hash or a different version number alone never authorizes cancellation.
-- `incompatibleContractVersions` declares genuine incompatibility; contradictory declarations
-  reject. Explicit incompatibility or genuinely unreadable host protocol can produce quiet
-  host cancellation only with enough readable identity to bind the exact occurrence.
-  Never guess a cancellation target or race an active turn.
-- Missing/disabled backend, undeclared version, missing renderer or rendering failure keeps
-  pending input with readable fallback and recovery dismissal. Frontend failure cannot
-  declare incompatibility. No automatic upgrade/range/migration over chat records exists.
+- 当前后端支持其确切的 `contractVersion`。已保存的 schema 仍然有效。仅凭包修订/哈希或不同的版本号，永远不会授权取消。
+- `incompatibleContractVersions` 声明真正的不兼容；自相矛盾的声明会被拒绝。只有在具备足够可读身份信息以绑定确切出现位置时，显式不兼容或确实无法读取的宿主协议才能导致宿主静默取消。永远不要猜测取消目标，也不要与活动回合竞争。
+- 后端缺失/被禁用、未声明的版本、缺少渲染器或渲染失败时，会保留待处理输入，并提供可读的回退内容和用于恢复的关闭操作。前端故障不能声明不兼容。不存在针对聊天记录的自动升级/版本范围/迁移。
 
-## 6. Grading and saved results
+## 6. 评分与已保存结果
 
-Optional `gradeAnswer(context)` runs **after validation, before save**, receiving immutable
-historical input/answer and a host signal. Return any finite JSON, not a host envelope.
-There is no host result schema, correctness/status enum, scoring or automatic badge UI.
+可选的 `gradeAnswer(context)` 在**校验之后、保存之前**运行，接收不可变的历史输入/回答以及一个宿主信号。返回任意有限 JSON，而不是宿主封装。没有宿主结果 schema、正确性/状态枚举、计分或自动徽章 UI。
 
-The host answer envelope contains `kind: "plugin-question"`, `questionId`, `pluginId`,
-`typeId`, `contractVersion`, exact `answer`, applicable `thinking`/`readingThinking`,
-`answeredAt`, optional image channels and optional `grading`:
+宿主回答封装包含 `kind: "plugin-question"`、`questionId`、`pluginId`、`typeId`、`contractVersion`、确切的 `answer`、适用的 `thinking`/`readingThinking`、`answeredAt`、可选的图片通道以及可选的 `grading`：
 
 ```ts
 type PluginQuestionGradingOutcome = { result: JsonValue } | { error: string };
 ```
 
-The server supplies identity/time. Thinking is separate from answer; `showThinking`
-controls applicability, not nonempty-writing requirements. Reading thinking applies only
-to teach checks. Preserve applicable defined empty/whitespace values; reject injected
-inapplicable channels. Full accepted details persist in the native result; model-facing
-text includes answer/thinking/grading, with native image blocks alongside it. There is no
-plugin-controlled replacement of the host answer message.
+服务端提供身份/时间。思考与回答相互独立；`showThinking` 控制适用性，而不是要求必须写入非空内容。阅读思考仅适用于教学检查（teach check）。保留适用通道中已定义的空/空白值；拒绝注入的不适用通道。完整的已受理详情持久化在原生结果中；面向模型的文本包含回答/思考/评分，原生图片块与之并列。插件不能替换宿主的回答消息。
 
-Throws/rejections/non-JSON grading returns save an **accepted answer with `grading.error`**,
-not a validation failure. Successful falsy/null/empty results remain valid. Outcomes reach
-`mountAnswered` and the model; projection, continuation/retry and remount never rerun grading.
+评分抛错/拒绝/返回非 JSON 时，会保存一个**带有 `grading.error` 的已受理回答**，而不是校验失败。成功返回的假值/null/空结果仍然有效。结果会传递给 `mountAnswered` 和模型；投影、继续/重试和重新挂载永远不会重新评分。
 
-Grading is pose-frozen: protocol v2 records `requiresGrading: true`; v1 remains ungraded
-if a hook is later added, and unexpected v1 grading is ignored on projection without
-rewriting history. Missing exact required grader keeps the question unavailable/pending.
-An older host unable to read v2 may quietly cancel the bound unreadable occurrence.
-Manifest API version remains 1.
+评分在出题时冻结：协议 v2 记录 `requiresGrading: true`；v1 即使之后添加了钩子也保持不评分，投影时会忽略意外出现的 v1 评分，且不改写历史。缺少确切所需的评分器时，问题保持不可用/待处理。无法读取 v2 的旧版宿主可以静默取消所绑定的不可读出现位置。清单 API 版本仍为 1。
 
-Grading occupies the inline answer POST/existing turn-preparation owner: no jobs, queue
-or extra LLM pass. Captured model/provider stays fixed through continuation. Disconnect/
-navigation does not cancel admitted grading. Stop, disable or exact registration removal
-aborts its signal and fences save: no learner answer saves for that attempt. The host
-waits for actual callback settlement, not an abort-race wrapper. Cancellation is cooperative;
-plugins own deadlines/cleanup, with no hard host timeout/process termination.
+评分占用内联回答 POST/现有的回合准备所有者：不使用后台任务、队列或额外的 LLM 调用。捕获的模型/服务商在整个继续过程中保持不变。断开连接/导航不会取消已准入的评分。停止、禁用或确切注册的移除会中止其信号并封锁保存：该次尝试不会保存任何学习者回答。宿主等待回调实际结束，而不是使用与中止竞争的包装。取消是协作式的；截止时间/清理由插件负责，宿主没有强制超时/进程终止。
 
-There is no automatic plugin-answer 409 retry. Explicit pre-save retry may rerun grading;
-no across-crash exactly-once guarantee or rollback of external side effects is promised.
-Lost acknowledgment requires canonical reconciliation, not a guessed new submission.
+插件回答不会在 409 后自动重试。保存前的显式重试可能重新评分；不承诺跨崩溃的恰好一次保证，也不回滚外部副作用。确认丢失时需要基于权威记录重新同步，而不是猜测性地发起新提交。
 
-Dismissal/incompatibility produce honest host cancellation results, not learner answers,
-and do not automatically run the teacher. Next deliberate input follows normal wake rules.
+关闭/不兼容会产生如实的宿主取消结果，而不是学习者回答，也不会自动运行老师。下一次有意的输入遵循常规的唤醒规则。
 
-## 7. Frontend slots, drafts and lifetime
+## 7. 前端插槽、草稿与生命周期
 
 `registerQuestionRenderer({id,supportedContractVersions,mountQuestion?,mountAnswerEditor,
-mountAnswered?})` returns an unregister function scoped to the owning plugin/type.
-Default question presentation is host Markdown; default answered presentation is readable
-saved learner data. These slots are not ordinary tool renderers or cross-plugin claims.
+mountAnswered?})` 返回一个作用域限定在所属插件/类型的注销函数。默认的问题呈现是宿主 Markdown；默认的已回答呈现是可读的已保存学习者数据。这些插槽不是普通的工具渲染器，也不是跨插件的声明。
 
-Mounts receive immutable normalized input, chat/question ID, historical contract version,
-variant and signal. `mountAnswered` adds accepted answer, optional grading and optional
-readonly `headerContainer` (inline after host label) / `footerContainer` (after host answer
-thinking). These live DOM slots share the body's generation/signal/cleanup, confer no
-ownership of host heading/thinking, and disappear on failure/replacement/unmount. If absent,
-use body fallback; never query/move surrounding host DOM or retain slots across generations.
-Question/editor mounts receive neither slot. Host thinking/images stay outside plugin bodies.
+挂载接收不可变的规范化输入、聊天/问题 ID、历史契约版本、变体和信号。`mountAnswered` 额外提供已受理的回答、可选的评分，以及可选的只读 `headerContainer`（内联于宿主标签之后）/ `footerContainer`（位于宿主回答思考之后）。这些实时 DOM 插槽与主体共享代次/信号/清理，不授予对宿主标题/思考的归属，并在失败/替换/卸载时消失。如果插槽不存在，就回退到主体中；永远不要查询/移动周围的宿主 DOM，也不要跨代次保留插槽。问题/编辑器挂载不接收任何插槽。宿主的思考/图片始终位于插件主体之外。
 
-The editor receives `active`, controlled `answer` and synchronous `onChange(state)`:
-`{status:"empty"}` or `{status:"unready"|"ready",value:JsonValue}`. Ready requires a current
-handle/publication; schema-valid falsy/empty values may qualify. Drafts need not yet pass
-the schema. `empty` keeps no value; use `unready` to retain incomplete text.
+编辑器接收 `active`、受控的 `answer` 和同步的 `onChange(state)`：`{status:"empty"}` 或 `{status:"unready"|"ready",value:JsonValue}`。就绪要求有当前的句柄/发布；符合 schema 的假值/空值也可以算作就绪。草稿暂时无需通过 schema。`empty` 不保留任何值；要保留不完整的文本请使用 `unready`。
 
-Required handle: `update({answer,active})`, `focus()`, `dispose()`; optional
-`handleKeyDown(key): "handled" | "pass"`, `appendTranscript(text)` (sync/async).
-Apply controlled updates without echoing publication or resetting identical selection/
-composition. Async mounts/late callbacks are exact-occurrence/generation scoped: obsolete
-handles cannot publish, focus, consume keys or receive speech.
+必需的句柄：`update({answer,active})`、`focus()`、`dispose()`；可选的 `handleKeyDown(key): "handled" | "pass"`、`appendTranscript(text)`（同步/异步）。应用受控更新时不要回显发布，也不要重置相同的选区/输入法组合。异步挂载/迟到的回调作用域限定在确切的出现位置/代次：过时的句柄不能发布、聚焦、消费按键或接收语音。
 
-Keep mounts alive across folding, updating active state. Same-question canonical adoption
-must not remount. In-memory occurrence-keyed drafts survive remounts while the session model
-lives, not necessarily model destruction/reload/restart. No persistent draft format is added.
+折叠期间保持挂载存活，并更新其活动状态。同一问题的权威采纳不得导致重新挂载。只要会话模型仍存活，按出现位置索引的内存草稿就能在重新挂载后保留，但不一定能在模型销毁/重新加载/重启后保留。不新增持久化的草稿格式。
 
-## 8. Keyboard, dictation and native UI
+## 8. 键盘、语音听写与原生 UI
 
-Host Enter submits; Shift+Enter edits a newline; reserved Cmd/Ctrl+Enter submits subject
-to readiness/IME. Offer plain Tab, Enter, Shift+Enter and Escape to the active eligible
-editor first. `handled` claims once; omission/`pass` uses host defaults. Tab uses the
-private host field chain, not browser traversal. Unhandled Escape moves to the next host
-field (or blurs an editor-only chain), claiming that event without also discarding or
-aborting. App shortcuts retain precedence, including Shift+Tab model-thinking cycling.
-No public shortcut registry.
+宿主中 Enter 提交；Shift+Enter 编辑换行；保留的 Cmd/Ctrl+Enter 在满足就绪/IME 条件时提交。先把普通的 Tab、Enter、Shift+Enter 和 Escape 交给活动且符合条件的编辑器。`handled` 表示认领一次；省略/`pass` 则使用宿主默认行为。Tab 使用宿主私有的字段链，而不是浏览器的焦点遍历。未被处理的 Escape 移动到下一个宿主字段（或在只有编辑器的链中失去焦点），认领该事件，但不会同时放弃或中止。应用快捷键保持优先，包括用于切换模型推理强度的 Shift+Tab。没有公开的快捷键注册表。
 
-Outside the editor, after focused-field/dictation/layer handling, Escape uses native
-question-dismissal confirmation. Cancel/dialog Escape preserves drafts. Confirmation binds
-the exact occurrence/question; stale targets close without action, never retarget. Idle
-confirmation saves cancellation without teacher wake. During grading the silent dismissal
-route validates current state, parks dismissal and requests Stop together; actual grader
-cleanup must settle before parked cancellation lands. Healthy questions still gain no
-ordinary Dismiss button, and builtin question/problem behavior is unchanged.
+在编辑器之外，经过聚焦字段/语音听写/层的处理之后，Escape 使用原生的关闭问题确认。取消/对话框中的 Escape 会保留草稿。确认绑定确切的出现位置/问题；过期的目标关闭时不执行任何操作，永远不会改投目标。空闲时的确认会保存取消结果，且不唤醒老师。评分期间，静默关闭路径会校验当前状态，暂存关闭操作并同时请求停止；实际的评分器清理必须结束后，暂存的取消才会落定。健康的问题仍然不会获得普通的关闭按钮，内置问题/题目的行为保持不变。
 
-Composition/229 must not submit/cycle/run editing commands; preserve composing Enter's
-native default while suppressing host routing. Covered/hidden/stale editors cannot claim.
-Keep the editor outside the submit footer's native form; no fabricated keyboard dispatch.
+输入法组合（composition）/229 不得触发提交/切换/执行编辑命令；保留组合中 Enter 的原生默认行为，同时抑制宿主路由。被覆盖/隐藏/过期的编辑器不能认领事件。将编辑器放在提交页脚的原生表单之外；不伪造键盘事件分派。
 
-Dictation goes to unrevealed check ReadingThinking; after reveal/open probe/predict it
-goes to host Thinking when enabled, otherwise explicit editor `appendTranscript` if
-provided. Without either, microphone stays visible/disabled, never routes to a hidden
-composer. Folding does not erase/redirect it. Finish before reveal/submit; transcript
-callbacks must publish before resolving. Settle/cancel obsolete capture destinations.
+语音听写在检查题未揭晓时进入 ReadingThinking；揭晓后或在开放的 probe/predict 中，若启用了宿主思考则进入宿主思考，否则在编辑器提供了 `appendTranscript` 时显式交给它。两者都没有时，麦克风保持可见但禁用，永远不会路由到隐藏的输入框。折叠不会清除或重定向它。在揭晓/提交之前完成听写；听写文本回调必须在 resolve 之前完成发布。结束/取消已过时的捕获目标。
 
-Reuse native dock/card/stats/toolbar/reveal machinery, not a rewrite of builtin forms.
-Thinking uses the native frame with compact 40px minimum and natural growth. Healthy
-questions have no Dismiss; it is recovery-only. Unknown/sync-failed availability is not
-confirmed unavailability: show Preparing or readable content with Retry syncing, gate
-submission, and keep an admitted same-owner editor read-only until canonical readiness.
-Legitimate initial publications/transcript completion still settle under draft-ownership
-checks while interaction is inactive.
+复用原生的停靠区/卡片/统计/工具栏/揭晓机制，而不是重写内置表单。思考使用原生框架，最小高度紧凑为 40px，并随内容自然增长。健康的问题没有关闭按钮；它仅用于恢复。未知/同步失败的可用性并不等于已确认不可用：显示准备中或带有“重试同步”的可读内容，限制提交，并在权威就绪之前让已准入的同一所有者编辑器保持只读。在交互不活动期间，合理的初始发布/听写完成仍会在草稿归属检查下结束。
 
-Opening height retargets from current geometry over remaining original animation time
-when late editor admission changes size; do not delay/restart opening, animate ordinary
-typing growth or remount the editor. In history, reading thinking is above the card with
-native label/default-open; answer thinking is inside with native inCard/default-closed.
-Defined empty/whitespace channels remain present; text/images combine per channel.
+当编辑器迟到的准入改变了尺寸时，展开高度会从当前几何形状出发，在原展开动画的剩余时间内重新调整目标；不要延迟/重启展开动画，不要为普通输入导致的增高添加动画，也不要重新挂载编辑器。在历史中，阅读思考位于卡片上方，使用原生标签并默认展开；回答思考位于卡片内部，使用原生 inCard 并默认折叠。已定义的空/空白通道仍然存在；文本/图片按通道组合。
 
-Fallback respects reveal pacing, shows safe saved Markdown/status, disables submission
-and exposes recovery dismissal. Copy: `Preparing question…`, `Question unavailable`,
-`Dismiss question`, `Could not sync the saved session.` / `Retry syncing`.
+回退内容遵循揭晓节奏，显示安全的已保存 Markdown/状态，禁用提交，并提供用于恢复的关闭操作。界面文案：`正在准备问题…`、`问题不可用`、`跳过问题`、`无法同步已保存的会话。` / `重试同步`。
 
-## 9. Testing
+## 9. 测试
 
-Tests should cover ledger-attested poses/mixed batches, stream suppression, canonical
-reconnect/adoption, exact occurrences, schemas/local references, unavailable/incompatible
-states, grading cancellation/save order, duplicate/legacy bypasses, editor generations,
-drafts, keyboard/IME, speech delivery and host fallback. Typecheck against the portable SDK
-and exercise the plugin in an isolated app profile as well as unit/component fixtures.
+测试应覆盖经账本证明的出题/混合批次、流抑制、权威重新连接/采纳、确切出现位置、schema/本地引用、不可用/不兼容状态、评分取消/保存顺序、重复/旧路径绕过、编辑器代次、草稿、键盘/IME、语音投递以及宿主回退。针对可移植 SDK 进行类型检查，并在隔离的应用配置文件中运行插件，同时使用单元/组件测试夹具。

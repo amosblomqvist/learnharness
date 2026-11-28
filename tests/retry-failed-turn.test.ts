@@ -440,7 +440,7 @@ describe("Retry refusal and revalidation", () => {
 		try {
 			const res = await handleChatRequest(post(chat.id, { type: "retry" }), () => { throw new Error("must not construct an agent"); });
 			assert.equal(res.status, 400, "invalid retry wins even with an unavailable subscription model");
-			assert.match(await res.text(), /requires a failed turn/);
+			assert.match(await res.text(), /没有可重试的失败回合。/);
 			assert.deepEqual(chatStore.getChat(chat.id), before);
 			assert.equal(turnFailure(chat.id), "Existing settlement notice", "beginTurn did not clear recovery state");
 			assert.equal(isTurnRunning(chat.id), false);
@@ -462,7 +462,7 @@ describe("Retry refusal and revalidation", () => {
 		const res = await turn(engine, chat.id, { type: "retry" });
 		assert.equal(res.status, 400);
 		const body = await res.json() as { error: string };
-		assert.equal(body.error, "fetch failed\n\nThis response cannot be retried after compaction. Send a new message to continue.");
+		assert.equal(body.error, "fetch failed\n\n上下文压缩后无法重试此回复。请发送一条新消息继续。");
 		assert.deepEqual(chatStore.getChat(chat.id), snapshot);
 		assert.equal(contexts.length, 0);
 		assert.equal(new SessionModel({ chatId: chat.id, initialMessages: before }).getState().error?.message, "fetch failed");
@@ -489,7 +489,7 @@ describe("Retry refusal and revalidation", () => {
 			try {
 				const res = await turn(engine, chat.id, { type: "retry" });
 				assert.equal(res.status, 400);
-				if (later === "compaction") assert.match(await res.text(), /fetch failed.*cannot be retried after compaction/);
+				if (later === "compaction") assert.match(await res.text(), /fetch failed.*上下文压缩后无法重试此回复。/);
 				assert.deepEqual(read(chat.id)!.messages, [...before, appended]);
 				assert.equal(contexts.length, 0);
 				assert.equal(isTurnRunning(chat.id), false);
@@ -517,7 +517,7 @@ describe("the Retry button's client path", () => {
 	it("keeps the original model error plus the explanation when compaction wins the click race", async () => {
 		const messages = [newUserMessage("hello"), failed("failed-response")];
 		const compacted = [...messages, compaction("failed-response")];
-		const explanation = "This response cannot be retried after compaction. Send a new message to continue.";
+		const explanation = "上下文压缩后无法重试此回复。请发送一条新消息继续。";
 		const refused = `fetch failed\n\n${explanation}`;
 		const m = new SessionModel({
 			chatId: "chat_x", initialMessages: messages,
@@ -536,7 +536,7 @@ describe("the Retry button's client path", () => {
 	});
 
 	for (const { status, body, expected } of [
-		{ status: 400, body: '{"error":"retry input requires a failed turn to retry"}', expected: "retry input requires a failed turn to retry" },
+		{ status: 400, body: '{"error":"没有可重试的失败回合。"}', expected: "没有可重试的失败回合。" },
 		{ status: 400, body: "Plain refusal", expected: "Plain refusal" },
 		{ status: 400, body: '{"reason":"not an error envelope"}', expected: '{"reason":"not an error envelope"}' },
 		{ status: 503, body: '{"error":"model gate","code":"models_not_configured"}', expected: '{"error":"model gate","code":"models_not_configured"}' },
@@ -595,7 +595,7 @@ describe("Retry eligibility and temporary omissions (pure)", () => {
 		for (const messages of [[user, failure, marker], [user, failure, marker, block], [user, failure, block, marker]]) {
 			assert.equal(endsInFailedTurn(messages), false);
 			assert.equal(failedResponseAtEnd(messages)?.id, failure.id, "only the Retry button disappears, not the banner");
-			assert.throws(() => retryDrops(messages), /fetch failed[\s\S]*cannot be retried after compaction/);
+			assert.throws(() => retryDrops(messages), /fetch failed[\s\S]*上下文压缩后无法重试此回复。/);
 		}
 		assert.deepEqual([...retryDrops([user, failed("old"), marker, failed("new")])], ["new"], "a failure after compaction can retry its already-compacted starting state");
 	});

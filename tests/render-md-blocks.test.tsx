@@ -52,7 +52,7 @@ describe("md-blocks — code", () => {
 		assert.ok(html.includes('data-testid="md-code"'), "the md-blocks wrapper mounts");
 		assert.ok(html.includes('data-streamdown="code-block"'), "the delegated CodeBlock path is kept");
 		assert.ok(html.includes('data-streamdown="code-block-body"'), "shiki body renders");
-		assert.match(html, /aria-label="Copy code"/, "the corner copy affordance is present");
+		assert.match(html, /aria-label="复制代码"/, "the corner copy affordance is present");
 		// NAMED group (group/md) — the message container is also a `group`,
 		// and an unnamed group-hover would light every corner in the message at
 		// once (owner report, 2026-09-19); only the hovered block reveals.
@@ -182,7 +182,7 @@ describe("md-blocks — tables", () => {
 			assert.equal(table.querySelector("strong")?.textContent, "Bold");
 			assert.equal(table.querySelector(".katex[data-tex]")?.getAttribute("data-tex"), "x^2");
 			assert.ok(table.textContent.includes("Guide"), "link text survives the normal link-safety renderer");
-			assert.equal(wrapper.querySelectorAll('button[aria-label="Copy table"]').length, 1);
+			assert.equal(wrapper.querySelectorAll('button[aria-label="复制表格"]').length, 1);
 		}
 	});
 
@@ -191,7 +191,7 @@ describe("md-blocks — tables", () => {
 		assert.ok(html.includes('data-testid="md-table"'), "the md-blocks table wrapper mounts");
 		assert.ok(html.includes('data-streamdown="table"'), "the table itself renders");
 		assert.ok(!html.includes('data-streamdown="table-wrapper"'), "streamdown's boxed wrapper is gone");
-		assert.match(html, /aria-label="Copy table"/, "the corner copy affordance is present");
+		assert.match(html, /aria-label="复制表格"/, "the corner copy affordance is present");
 		assert.ok(!html.match(/Fullscreen|aria-label="Download"/), "no fullscreen/download chrome on tables");
 		// The corner is CONTAINED in the table (top-1 right-1, not the old
 		// -top-3 that straddled the top outline — the 24px button at a 12px
@@ -217,7 +217,7 @@ describe("md-blocks — display math", () => {
 		const html = render("$$\n\\int_0^1 x^2\\,dx = \\tfrac{1}{3}\n$$");
 		assert.ok(html.includes("katex-display"), "display math still renders via KaTeX");
 		assert.ok(html.includes('data-testid="md-math"'), "the md-blocks math wrapper mounts");
-		assert.match(html, /aria-label="Copy equation source"/, "the corner copy affordance is present");
+		assert.match(html, /aria-label="复制公式源码"/, "the corner copy affordance is present");
 		// The wrapper is BLOCK: the katex-display child is display:block, and
 		// an inline wrapper around it fragments — the absolute corner then has
 		// no clean containing block and pointer events never land (the math

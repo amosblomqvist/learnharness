@@ -40,8 +40,8 @@ const outputLiteral = '<script data-native-output="true">output only</script> & 
 const passedStdout = outputLiteral + "function returned 42\n";
 const reviewText = "Offline teacher reviewed the exact learner code, separate thinking, and recorded test-process outcome. Tests are observations, not proof of correctness.";
 const dock = '[data-testid="plugin-question-dock"]';
-const editor = `${dock} [contenteditable="true"][aria-label="Code answer"]`;
-const thinking = `${dock} [contenteditable="true"][aria-label="Your thinking"]`;
+const editor = `${dock} [contenteditable="true"][aria-label="代码答案"]`;
+const thinking = `${dock} [contenteditable="true"][aria-label="你的思考"]`;
 const mod = process.platform === "darwin" ? "Meta" : "Control";
 const evidence = { scratch, source, runtime, testNode, chrome, manifest, stage: "prepare", assertions: [], requests: [], responses: [], failedRequests: [], blockedRequests: [], pageErrors: [], console: [], providerRequests: [], streams: [], screenshots: [] };
 let child, browser, page, failure, sourceDigest;
@@ -258,7 +258,7 @@ try {
     const sent = post(input => input?.text === text);
     const subscribed = page.waitForResponse(response => new URL(response.url()).pathname === route + "/stream");
     await page.locator('[data-testid="composer"] [contenteditable="true"]').fill(text);
-    await page.locator('[data-testid="composer"] button[aria-label="Send"]').click();
+    await page.locator('[data-testid="composer"] button[aria-label="发送"]').click();
     assert.equal((await sent).status(), 200); assert.equal((await subscribed).status(), 200); await release();
   }
   const code = selector => page.$$eval(`${selector} .cm-line`, lines => lines.map(line => line.textContent).join("\n"));
@@ -319,12 +319,12 @@ try {
     await page.keyboard.press("Escape"); await focusIs(thinking); await assertNoDialog();
     await page.keyboard.press("Escape");
     await page.waitForSelector(dialog, { visible: true });
-    assert.ok((await page.$eval(dialog, node => node.textContent)).includes("Dismiss this question?"));
+    assert.ok((await page.$eval(dialog, node => node.textContent)).includes("跳过这个问题？"));
     await page.locator('[data-testid="abort-turn-cancel"]').click();
     await page.waitForSelector(dialog, { hidden: true }); await assertPreserved("Cancel");
     await page.focus(thinking); await page.keyboard.press("Escape");
     await page.waitForSelector(dialog, { visible: true });
-    assert.ok((await page.$eval(dialog, node => node.textContent)).includes("Dismiss this question?"));
+    assert.ok((await page.$eval(dialog, node => node.textContent)).includes("跳过这个问题？"));
     await page.keyboard.press("Escape");
     await page.waitForSelector(dialog, { hidden: true }); await assertPreserved("Dialog Escape");
     (evidence.keyboardRecovery ??= []).push({ phase, questionId: snapshot.questionId, occurrence: snapshot.occurrence, editorEscapeToThinking: true,
@@ -348,7 +348,7 @@ try {
         labelClasses: frame.firstElementChild.className, actionsClasses: frame.lastElementChild.className,
         hint: frame.lastElementChild.querySelector('span[aria-hidden]')?.textContent.trim(),
         submitLabel: frame.querySelector('button[type="submit"]')?.textContent.trim(),
-        dismiss: [...frame.closest('[data-testid="plugin-question-dock"]').querySelectorAll("button")].some(button => button.textContent.trim() === "Dismiss question") };
+        dismiss: [...frame.closest('[data-testid="plugin-question-dock"]').querySelectorAll("button")].some(button => button.textContent.trim() === "跳过问题") };
     });
     assert.equal(result.classes, result.canonical);
     assert.deepEqual(result.actual, result.expected, "Pending field matches the canonical native frame's computed styles");
@@ -359,8 +359,8 @@ try {
     for (const token of ["field-sizing-content", "lh-input", "max-h-48", "w-full", "resize-none", "bg-transparent", "px-2.5", "py-2", "outline-none", "placeholder:text-muted-foreground/70", "min-h-10"]) assert.ok(result.inputClasses.split(" ").includes(token), token);
     assert.equal(result.inputBackground, "rgba(0, 0, 0, 0)");
     assert.equal(result.inputMinHeight, "40px", "Thinking uses the native one-line minimum");
-    assert.equal(result.hint, "↵ submits · ⇧↵ newline");
-    assert.equal(result.submitLabel, "Submit answer");
+    assert.equal(result.hint, "↵ 提交 · ⇧↵ 换行");
+    assert.equal(result.submitLabel, "提交答案");
     assert.equal(result.labelClasses, "px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground");
     assert.equal(result.actionsClasses, "flex items-center justify-between gap-2 p-1");
     assert.equal(result.dismiss, false, "Healthy questions never expose recovery Dismiss");
@@ -370,7 +370,7 @@ try {
     const cards = await page.$$('[data-testid="plugin-question-answered"]'); assert.equal(cards.length, index + 1);
     const card = cards[index], block = await card.$('[data-testid="your-thinking"]'); assert.ok(block);
     const trigger = await block.$('[data-testid="your-thinking-trigger"]');
-    assert.equal(await trigger.evaluate(node => node.textContent.trim()), "YOUR THINKING");
+    assert.equal(await trigger.evaluate(node => node.textContent.trim()), "你的思考");
     assert.equal(await trigger.evaluate(node => node.getAttribute("aria-expanded")), "false", "Answer thinking defaults closed");
     assert.equal(await block.evaluate(node => node.classList.contains("bg-card")), false, "inCard thinking has no separate background band");
     assert.equal(await block.$(".lh-prose"), null);
@@ -379,7 +379,7 @@ try {
     else {
       assert.equal(readings.length, index);
       const reading = readings.at(-1);
-      assert.equal(await reading.evaluate(node => node.querySelector("button").textContent.trim()), "YOUR THINKING");
+      assert.equal(await reading.evaluate(node => node.querySelector("button").textContent.trim()), "你的思考");
       assert.equal(await reading.evaluate(node => node.querySelector("button").getAttribute("aria-expanded")), "true", "Reading thinking defaults open");
       assert.equal(await reading.$eval(".lh-prose", node => node.textContent), readingText);
       assert.equal(await card.evaluate((node, preceding) => node.previousElementSibling === preceding && !node.contains(preceding), reading), true, "Reading thinking sits above/outside the answered card");
@@ -418,13 +418,13 @@ try {
     assert.equal(await card.$$eval(".lh-coding-test-result", nodes => nodes.length), 1);
     assert.equal(await card.$$eval(".lh-coding-prompt", nodes => nodes.length), 1);
     assert.equal(await card.$eval(".lh-coding-prompt", node => node.textContent), index === 0 ? "Predict by editing this JavaScript function." : "Read the coding check, then reveal and edit the function.", "Answered history keeps the original saved prompt visible");
-    const label = result.status === "passed" ? "Tests passed" : result.status === "failed" ? "Tests failed" : "Could not run tests";
+    const label = result.status === "passed" ? "测试通过" : result.status === "failed" ? "测试未通过" : "无法运行测试";
     const presentation = await output.evaluate((root, label) => {
       const card = root.closest('[data-testid="plugin-question-answered"]');
       const heading = card.firstElementChild, hostLabel = heading.firstChild;
       const badgeRoot = heading.querySelector(".lh-coding-test-result__badge");
       const badge = badgeRoot && [...badgeRoot.querySelectorAll("*")].find(node => node.children.length === 0 && node.textContent === label);
-      const submitted = card.querySelector('[aria-label="Submitted code"]');
+      const submitted = card.querySelector('[aria-label="已提交的代码"]');
       const colorFor = value => { const probe = document.createElement("span"); probe.style.color = value; root.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; };
       return { badge: !!badge, color: badge ? getComputedStyle(badge).color : null,
         green: colorFor("var(--color-green-500, #22c55e)"), red: colorFor("var(--color-red-500, #ef4444)"),
@@ -436,14 +436,14 @@ try {
         parsedOutputTags: root.querySelectorAll("script, [data-native-output]").length };
     }, label);
     assert.equal(presentation.badge, true); assert.equal(presentation.aboveCode, true); assert.equal(presentation.parsedOutputTags, 0);
-    assert.equal(presentation.hostLabel, "Coding question"); assert.equal(presentation.afterHostLabel, true);
+    assert.equal(presentation.hostLabel, "编程问题"); assert.equal(presentation.afterHostLabel, true);
     assert.equal(presentation.inHeadingNotBody, true, "The public headerContainer badge is in the host heading suffix, outside the result body");
     assert.equal(presentation.badgeCount, 1); assert.equal(presentation.badgeStatus, result.status);
     if (result.status === "passed") assert.equal(presentation.color, presentation.green);
     else if (result.status === "failed") assert.equal(presentation.color, presentation.red);
     else { assert.notEqual(presentation.color, presentation.green); assert.notEqual(presentation.color, presentation.red); }
     const toggle = await output.$(".lh-coding-test-output > button");
-    assert.equal(await toggle.evaluate(node => node.textContent), "Test output");
+    assert.equal(await toggle.evaluate(node => node.textContent), "测试输出");
     assert.equal(await toggle.evaluate(node => node.getAttribute("aria-expanded")), "false", "Test output starts collapsed");
     assert.equal(await output.$$eval("pre", nodes => nodes.length), 0);
     const disclosure = await toggle.evaluate(node => {
@@ -471,9 +471,9 @@ try {
     assert.deepEqual(focus, { visible: true, outlineWidth: "2px", outlineStyle: "solid", outlineOffset: "2px" });
     await toggle.click();
     assert.equal(await toggle.evaluate(node => node.getAttribute("aria-expanded")), "true");
-    assert.equal(await toggle.evaluate(node => node.textContent), "Hide test output");
+    assert.equal(await toggle.evaluate(node => node.textContent), "收起测试输出");
     const frames = await output.evaluate(root => {
-      const answerFrame = root.closest('[data-testid="plugin-question-answered"]').querySelector('[aria-label="Submitted code"]').closest(".lh-coding-question");
+      const answerFrame = root.closest('[data-testid="plugin-question-answered"]').querySelector('[aria-label="已提交的代码"]').closest(".lh-coding-question");
       const frameKeys = ["backgroundColor", "color", "borderTopColor", "borderTopWidth", "borderTopStyle", "borderRadius", "overflow"];
       const headerKeys = ["color", "fontFamily", "fontSize", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderBottomWidth", "borderBottomStyle", "borderBottomColor"];
       const style = (node, keys) => Object.fromEntries(keys.map(key => [key, getComputedStyle(node)[key]]));
@@ -490,14 +490,14 @@ try {
     assert.deepEqual(await output.$$eval("pre", nodes => nodes.map(node => node.textContent)), [result.stdout, result.stderr].filter(text => text !== ""), "Nonempty streams remain exact escaped text; empty streams have no boxes");
     assert.equal(await output.$$eval("script, [data-native-output]", nodes => nodes.length), 0, "Output must be escaped text, not HTML");
     if (result.message !== undefined) assert.ok((await output.evaluate(node => node.textContent)).includes(result.message));
-    const submitted = await card.$('[aria-label="Submitted code"]');
+    const submitted = await card.$('[aria-label="已提交的代码"]');
     assert.equal(await submitted.evaluate(node => node.getAttribute("contenteditable")), "false");
     assert.equal(await submitted.$$eval(".cm-line", lines => lines.map(line => line.textContent).join("\n")), answer);
     const model = await card.$(".lh-coding-model-solution"), modelToggle = await model.$("button");
-    assert.equal(await modelToggle.evaluate(node => node.textContent), "Model solution");
+    assert.equal(await modelToggle.evaluate(node => node.textContent), "参考解答");
     assert.equal(await modelToggle.evaluate(node => node.getAttribute("aria-expanded")), "false");
     const order = await card.evaluate(card => {
-      const question = card.querySelector('.lh-coding-prompt'), code = card.querySelector('[aria-label="Submitted code"]'), output = card.querySelector('.lh-coding-test-result'), thinking = card.querySelector('[data-testid="your-thinking"]'), model = card.querySelector('.lh-coding-model-solution');
+      const question = card.querySelector('.lh-coding-prompt'), code = card.querySelector('[aria-label="已提交的代码"]'), output = card.querySelector('.lh-coding-test-result'), thinking = card.querySelector('[data-testid="your-thinking"]'), model = card.querySelector('.lh-coding-model-solution');
       const before = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
       return [before(question, code), before(code, thinking), before(thinking, output), before(output, model)];
     });
@@ -598,7 +598,7 @@ try {
   assert.deepEqual({ ...answers[0].details, answeredAt: "timestamp" }, { kind: "plugin-question", questionId: predict.questionId, pluginId: manifest.id, typeId: "code", contractVersion: 1, answer: exactAnswer, thinking: thinkingText, grading: predictGrading, answeredAt: "timestamp" });
   assert.ok(Number.isFinite(Date.parse(answers[0].details.answeredAt)));
   assert.deepEqual(answers[0].lhQuestionOccurrence, predict.occurrence);
-  const saved = '[aria-label="Submitted code"]';
+  const saved = '[aria-label="已提交的代码"]';
   await page.waitForSelector(saved);
   assert.equal(await page.$eval(saved, node => node.getAttribute("contenteditable")), "false");
   assert.equal(await page.$$eval(`${saved} .cm-line`, lines => lines.map(line => line.textContent).join("\n")), exactAnswer);
@@ -739,8 +739,8 @@ try {
   await fillCode(skipAnswer); await page.locator(thinking).fill(skipThinking);
   await page.focus(thinking); await page.keyboard.press("Escape");
   await page.waitForSelector('[data-testid="abort-turn-dialog"]', { visible: true });
-  assert.ok((await page.$eval('[data-testid="abort-turn-dialog"]', node => node.textContent)).includes("Dismiss this question?"));
-  assert.equal(await page.$eval('[data-testid="abort-turn-confirm"]', node => node.textContent.trim()), "Dismiss");
+  assert.ok((await page.$eval('[data-testid="abort-turn-dialog"]', node => node.textContent)).includes("跳过这个问题？"));
+  assert.equal(await page.$eval('[data-testid="abort-turn-confirm"]', node => node.textContent.trim()), "跳过");
   const skipProviderCount = evidence.providerRequests.length;
   const skipPosts = evidence.requests.filter(request => new URL(request.url).pathname === "/api/chat" && request.method === "POST").length;
   assert.equal(skipProviderCount, 7);
@@ -792,10 +792,10 @@ try {
   await page.waitForSelector(dock, { visible: true });
   const reveal = await page.$('[data-testid="teach-check-reveal"]');
   if (reveal && await reveal.evaluate(node => node.getClientRects().length > 0)) await reveal.click();
-  await page.waitForFunction(selector => document.querySelector(selector)?.textContent.includes("Question unavailable"), {}, dock);
+  await page.waitForFunction(selector => document.querySelector(selector)?.textContent.includes("问题不可用"), {}, dock);
   assert.equal(await page.$$eval(editor, nodes => nodes.length), 0);
   assert.ok((await page.$eval(dock, node => node.textContent)).includes(fallbackCheck.input.question));
-  assert.equal(await page.$$eval(`${dock} button`, buttons => buttons.filter(button => button.textContent.trim() === "Dismiss question").length), 1, "Unavailable renderer exposes exactly one recovery Dismiss");
+  assert.equal(await page.$$eval(`${dock} button`, buttons => buttons.filter(button => button.textContent.trim() === "跳过问题").length), 1, "Unavailable renderer exposes exactly one recovery Dismiss");
   const disabledRecord = await read();
   assert.equal(snapshots(disabledRecord).at(-1).questionId, fallbackCheck.questionId);
   assert.deepEqual(disabledRecord.messages.filter(message => message.details?.kind === "plugin-question"), priorAnswers, "Disabling must preserve all three earlier graded answers verbatim");
@@ -806,7 +806,7 @@ try {
   await screenshot("disabled-fallback");
   const dismissed = page.waitForResponse(response => new URL(response.url()).pathname === route + "/dismiss" && response.request().method() === "POST");
   // Use the visible recovery button through the browser's trusted input path.
-  await page.locator(`${dock} button::-p-text(Dismiss question)`).click();
+  await page.locator(`${dock} button::-p-text(跳过问题)`).click();
   assert.equal((await dismissed).status(), 200);
   await page.waitForSelector(dock, { hidden: true }); await delay(350);
   const finalRecord = await read();

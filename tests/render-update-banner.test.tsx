@@ -71,7 +71,7 @@ describe("update banner (Wave C)", () => {
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync(() => pushed?.({ status: "downloaded", version: "0.3.1", revision: 1 }));
 		assert.ok(host.innerHTML.includes("0.3.1"), "the version renders");
-		assert.ok(host.innerHTML.includes("Restart"), "the restart affordance renders");
+		assert.ok(host.innerHTML.includes(">重启</button>"), "the restart affordance renders");
 
 		const button = host.querySelector<HTMLButtonElement>("[data-testid='update-banner'] button");
 		assert.ok(button, "restart button exists");

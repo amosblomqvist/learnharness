@@ -17,6 +17,7 @@ import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
 import type { JobRecord } from "../core/contracts.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { tr } from "../core/i18n.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
 const JOBS_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
@@ -55,7 +56,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		toolCallId: init.toolCallId,
 		...(init.input !== undefined ? { input: init.input } : {}),
 		status: "running",
-		activity: init.activity ?? "starting",
+		activity: init.activity ?? tr("启动中", "starting"),
 		createdAt: now,
 		updatedAt: now,
 		...(init.plugin ? { plugin: init.plugin } : {}),

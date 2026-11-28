@@ -115,7 +115,7 @@ it("a swallowed session-unlink failure retains placement and folders, reports pa
 		stores.chatStore.deleteChat = () => false; // the store swallows unlink/I/O errors
 		const response = await remove([chat.id, "zero"], ["outer", "inner", "empty"], true);
 		assert.equal(response.status, 500);
-		assert.match((await response.json()).error, /Some entries may already have been removed/);
+		assert.match((await response.json()).error, /部分条目可能已被移除/);
 		assert.deepEqual(stores.chatStore.getChat(chat.id), before);
 		assert.equal(fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8"), organization, "no placement or selected folder is discarded on failed record removal");
 		assert.deepEqual(stores.graphStore.readNodes(), [], "earlier graph writes are honest partial progress");
@@ -180,7 +180,7 @@ it("partial I/O failure is honest and retry cleans stale placement without touch
 	try {
 		stores.sourceOrganizationStore.write = () => { throw new Error("synthetic disk failure"); };
 		const response = await remove(["a"], ["outer", "inner", "empty"]); assert.equal(response.status, 500);
-		assert.match((await response.json()).error, /Some entries may already/);
+		assert.match((await response.json()).error, /部分条目可能已/);
 	} finally { stores.sourceOrganizationStore.write = write; }
 	assert.deepEqual(stores.graphStore.readSources().map((s) => s.id), ["b"]);
 	assert.equal((await remove(["a"], ["outer", "inner", "empty"])).status, 200);

@@ -113,7 +113,7 @@ describe("picking a preset recolors the app and keeps my overrides", () => {
 	it("an unknown theme id is refused and the record is untouched", async () => {
 		const res = await put("appearance", { theme: "no-such-theme" });
 		assert.equal(res.status, 400);
-		assert.match(((await res.json()) as { error: string }).error, /unknown theme "no-such-theme"/);
+		assert.match(((await res.json()) as { error: string }).error, /未知的主题“no-such-theme”/);
 		assert.equal(readSettingsRecord()!.appearance, undefined);
 	});
 });

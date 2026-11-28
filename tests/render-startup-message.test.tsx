@@ -73,7 +73,7 @@ for (const method of ["button", "header button", "escape", "backdrop"]) it(`show
 	assert.deepEqual(f.dismissals, [], "showing does not count as dismissal");
 	if (method === "button") await act(async () => dialog()?.querySelector<HTMLButtonElement>("footer button")?.click());
 	else if (method === "header button") {
-		const close = dialog()?.querySelector<HTMLButtonElement>('header button[aria-label="Close announcement"]');
+		const close = dialog()?.querySelector<HTMLButtonElement>('header button[aria-label="关闭公告"]');
 		assert.ok(close);
 		await act(async () => close.click());
 	} else if (method === "escape") await f.escape();

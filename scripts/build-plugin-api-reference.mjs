@@ -10,15 +10,15 @@ const code = value => "`" + value.replaceAll("`", "&#96;").replaceAll("|", "\\|"
 const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed, removeComments: true });
 const guides = {
 	"plugins": ["Authoring and lifecycle", "../plugin-authoring.md"],
-	"plugin-ui": ["Controlled host UI", "../plugin-authoring.md#controlled-host-ui"],
+	"plugin-ui": ["Controlled host UI", "../plugin-authoring.md#受控的宿主界面"],
 	"plugin-tree": ["Tree behavior", "../plugin-tree-contract.md"],
 	"plugin-questions": ["Question lifecycle", "../plugin-question-contract.md"],
 	"plugin-problems": ["Practice problem lifecycle", "../plugin-problem-contract.md"],
 	"plugin-submissions": ["Submission interception", "../plugin-session-extension-contract.md"],
 	"plugin-view-context": ["Session view context", "../plugin-view-context.md"],
-	"plugin-agents": ["Managed agents", "../plugin-authoring.md#managed-conversational-agents"],
-	"plugin-workers": ["Workers and background tools", "../plugin-authoring.md#result-oriented-workers-and-background-tools"],
-	"plugin-shortcuts": ["Action shortcuts", "../plugin-authoring.md#action-shortcuts"],
+	"plugin-agents": ["Managed agents", "../plugin-authoring.md#托管的对话式智能体"],
+	"plugin-workers": ["Workers and background tools", "../plugin-authoring.md#面向结果的-worker-与后台工具"],
+	"plugin-shortcuts": ["Action shortcuts", "../plugin-authoring.md#动作快捷键"],
 };
 const declarationKind = node => ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node) || ts.isEnumDeclaration(node);
 function comments(node) {
@@ -115,7 +115,7 @@ export function createPluginApiReference({ sdk }) {
 	const pages = new Map(), modules = [...new Set(ordered.map(entry => entry.module))];
 	for (const module of modules) {
 		const local = ordered.filter(entry => entry.module === module);
-		const guide = guides[module] ?? ["Data access and host boundaries", "../plugin-authoring.md#backend-and-data"];
+		const guide = guides[module] ?? ["Data access and host boundaries", "../plugin-authoring.md#后端与数据"];
 		const text = [`# ${module}`, "", marker, "", `[API index](README.md) · [${guide[0]}](${guide[1]})`, "", ...local.map(entry => `- [${entry.name}](#${slug(entry.name)})${entry.public ? "" : " — supporting declaration"}`), ""];
 		for (const entry of local) {
 			text.push(`## ${entry.name}`, "", entry.public ? `Public SDK type, exported as ${entry.exports.map(code).join(", ")}. Import with \`import type\`; the SDK has no runtime exports.` : "Supporting declaration used by a public type. This is not an additional runtime API or SDK helper.", "");
