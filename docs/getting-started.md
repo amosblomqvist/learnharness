@@ -65,6 +65,32 @@ Chats, graph records, settings, and credentials live on your machine. Packaged d
 
 API-key files sit beside `data`, not inside it. They are plaintext with restrictive file permissions, not an encrypted vault. Keep complete profiles private; do not share credential files or raw debug captures in bug reports.
 
+### Back up or move an installation
+
+The reliable backup or one-time migration is a whole-profile copy while LearnHarness is closed. In the packaged desktop paths above, the profile is the `LearnHarness` folder containing `data/`; credential files sit beside `data/`.
+
+The learning record lives in `data/`:
+
+- `data/chats/`: saved teaching and practice sessions, including delivered artifacts.
+- `data/graph/`: proposition and reasoning-chain ledgers, extraction provenance and coverage, imported-note bookkeeping, and graph layout state.
+- `data/settings.json`: product preferences. `data/prompts/`, `data/themes/`, `data/plugins/`, and `data/core-plugin-data/` hold customizations and plugin state when present.
+- `data/jobs/`: background-work records. Delivered artifacts also appear in their sessions.
+
+`auth.json` and subscription credential JSON files are plaintext credentials. Keep profile backups on encrypted media or in an encrypted archive. If you do not need to preserve keys, omit credential files and sign in again on the new machine. Revoke old API keys before wiping or giving up the old machine. Caches, logs, debug captures, downloaded model assets, and model catalogs can be recreated or downloaded again.
+
+To move to a new machine:
+
+1. Quit LearnHarness on both machines.
+2. Copy the whole `LearnHarness` profile folder from the old machine into encrypted storage.
+3. Install LearnHarness on the new machine and quit it if it opened. If a `LearnHarness` profile already exists there, rename it instead of overwriting it.
+4. Place the copied profile at the path shown above for the new machine's OS.
+5. Start LearnHarness and verify your sessions, graph, and settings. Re-authenticate subscription connections if prompted.
+6. Delete the renamed destination profile only after the moved copy checks out.
+
+This is a replacement, not a merge or sync. If both machines created sessions since the last copy, there is no supported way to merge the profiles. Keep both profile copies separate and choose the copy you intend to keep. **Export as Markdown** in a session's context menu produces a readable transcript only; it is not restorable and does not include the graph, settings, or credentials.
+
+In a development checkout, `data/` and `auth.json` default to the repository root unless `LH_DATA_DIR` or `LH_AUTH_FILE` selects another location.
+
 **Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
 
 Click the context/cost row beneath the composer for Session stats. Dollar figures estimate known API costs; subscription, CLI, and custom-endpoint usage are not treated as free. See [context, caching, and costs](compaction-accounting.md) for the details.
