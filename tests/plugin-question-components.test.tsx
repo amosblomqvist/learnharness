@@ -64,8 +64,8 @@ async function fixture(options: { prepareSubmission?: PreparePluginQuestionSubmi
 		const [mic, setMic] = useState(false); state.mic = mic;
 		dictation = useDictation({ append: text => { state.fallback.push(text); }, disabled: !mic });
 		return <>
-			{options.check && <ReadingThinkingField inputRef={reading} value={draft.readingThinking} revision={0} onChange={value => { draft.readingThinking = value; }} claim={state.reveal} />}
-			<PluginQuestionDockContent snapshot={state.snapshot} chatId="chat" draft={draft} expanded={state.expanded} reveal={state.reveal} ready={state.ready} reconciliation={state.reconciliation} available={state.available} registration={registration} readingRef={reading} onMicAvailable={setMic}
+			{options.check && <ReadingThinkingField inputRef={reading} value={draft.readingThinking} revision={0} onChange={value => { draft.readingThinking = value; }} claim={!state.expanded} />}
+			<PluginQuestionDockContent snapshot={state.snapshot} chatId="chat" draft={draft} expanded={state.expanded} reveal={state.reveal} dictationClaim={!options.check || state.expanded} ready={state.ready} reconciliation={state.reconciliation} available={state.available} registration={registration} readingRef={reading} onMicAvailable={setMic}
 				prepareSubmission={options.prepareSubmission} onExpand={() => { state.reveal = false; state.expanded = true; }} send={async input => { state.sent.push(input); return true; }} dismiss={async () => { state.dismissed++; }} />
 			<DictationBar dictation={dictation} disabled={!mic} />
 			{options.keyboard && <AppRouterContext.Provider value={{ bfcacheId: "plugin-question-fixture", back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch() {} }}><KeyboardShortcuts /></AppRouterContext.Provider>}
@@ -602,4 +602,34 @@ test("renderer replacement cancels an old capture rather than delivering it to t
 	f.replaceRegistration({ ...f.registration!, renderer: { ...f.registration!.renderer, mountAnswerEditor(_container, props) { props.onChange({ status: "ready", value: "new" }); return { update() {}, focus() {}, dispose() {}, appendTranscript(text) { replacementSpeech.push(text); } }; } } });
 	await f.render();
 	assert.equal(f.dictation.active, false); assert.deepEqual(replacementSpeech, []); assert.deepEqual(f.state.speech, []); assert.deepEqual(f.state.fallback, []);
+});
+
+test("folded teaching check routes new dictation to reading and preserves an active question capture", async () => {
+	const f = await fixture({ check: true, thinking: true });
+	const speak = async (text: string) => {
+		await act(async () => { f.dictation.toggle(); });
+		const socket = f.socket;
+		await act(async () => { socket.open(); socket.final(text); f.dictation.stop(); socket.end(); });
+	};
+	await speak("reading before");
+	f.state.reveal = false; f.state.expanded = true; await f.render();
+	await speak("question open");
+	await act(async () => { f.dictation.toggle(); });
+	const socket = f.socket;
+	await act(async () => { socket.open(); socket.final("captured question"); });
+	f.state.expanded = false; await f.render();
+	await act(async () => { f.dictation.stop(); socket.end(); });
+	await speak("reading folded");
+	f.state.expanded = true; await f.render();
+	await speak("question reopened");
+	assert.equal(f.draft.readingThinking, "reading before reading folded");
+	assert.equal(f.draft.thinking, "question open captured question question reopened");
+});
+
+test("folded teaching check enables reading dictation when its plugin editor has no speech support", async () => {
+	const f = await fixture({ check: true });
+	f.state.reveal = false; f.state.expanded = true; await f.render();
+	assert.equal(f.state.mic, false);
+	f.state.expanded = false; await f.render();
+	assert.equal(f.state.mic, true);
 });
