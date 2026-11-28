@@ -1,18 +1,20 @@
 "use client";
 /**
  * The Keys section (wave-5 polish, 2026-09-21 — owner design): a MINIMAL
- * key-value table. Provider left, masked key right, no description hints
- * (they took too much space), the "Get a key ↗" link a tiny muted guest.
- * Clicking a writable row unfolds a paste field + Save (+ Delete for a
- * file-sourced value) beneath it; Esc or a second click folds it away.
+ * key-value table. Provider left, status + optional "Get key ↗" link +
+ * explicit "Add key" / "Edit" action button right, no description hints
+ * (they took too much space). Clicking the action button unfolds a paste
+ * field + Save (+ Delete for a file-sourced value) inline; Esc or Cancel
+ * folds it away and returns focus to the action button.
  * The Add-provider control is the LAST ROW of the table and uses the
  * app's shared dropdown look (ProviderMenuList — fuzzy search over the
  * 33 pi-ai providers).
  *
  * Owner rulings carried in:
  *  - Env-owned rows (a real environment variable owns the name — dev
- *    .env.local or launch env) render READ-ONLY + dimmed, no paste field:
- *    a paste box on a key the UI cannot make live would mislead.
+ *    .env.local or launch env) render READ-ONLY + dimmed, status only
+ *    with no edit control or external link: a paste box on a key the UI
+ *    cannot make live would mislead.
  *  - OpenRouter is NOT special: one provider among 33, a row only when
  *    stored, otherwise it lives in the Add dropdown like everyone else.
  *  - Providers groups API keys, subscriptions, dictation and search.
@@ -23,7 +25,7 @@
  * effect immediately. Plaintext never returns from the store.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
 	AUTH_KEYS,
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
@@ -34,6 +36,7 @@ import {
 	type CustomModel,
 	type CustomModelOverride,
 } from "@/src/core";
+import { Button } from "@/components/ui/button";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
@@ -158,14 +161,16 @@ export function keyStatusLine(status: AuthKeyStatus): string {
 	return `${tail} · ${chars}${status.source === "env" ? " · env" : ""}`;
 }
 
-/** One table row: label left, tiny docs link + status right. Writable
- *  rows click-unfold an editor beneath (owner interaction); env-owned
- *  rows are dimmed and read-only (a paste box there would mislead). */
+/** One table row: label left; status, optional external "Get key ↗" link, and
+ *  explicit "Add key" / "Edit" button right. Only the action button toggles
+ *  the inline editor; env-owned rows are dimmed and status-only (no edit
+ *  button or external link). */
 function KeyTableRow({
 	label,
 	docsUrl,
 	status,
 	expanded,
+	anotherRowOpen = false,
 	onToggle,
 	onSave,
 	onDelete,
@@ -173,10 +178,11 @@ function KeyTableRow({
 	testid,
 }: {
 	label: string;
-	/** The "Get a key ↗" target — curated keys carry one. */
+	/** The "Get key ↗" target — curated keys carry one. */
 	docsUrl?: string;
 	status: AuthKeyStatus;
 	expanded: boolean;
+	anotherRowOpen?: boolean;
 	onToggle: () => void;
 	onSave: (value: string) => Promise<string | null>;
 	onDelete?: () => Promise<void>;
@@ -186,9 +192,34 @@ function KeyTableRow({
 	testid: string;
 }) {
 	const envOwned = status.source === "env";
+	const isEditing = expanded && !envOwned;
 	const [value, setValue] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	const rowRef = useRef<HTMLDivElement>(null);
+	const actionRef = useRef<HTMLButtonElement>(null);
+	const wasEditingRef = useRef(isEditing);
+	const interactions = useOptionalInteractionLayers();
+
+	// Restore focus synchronously during commit (after useInteractionLayer
+	// cleanup and before Radix FocusScope's MutationObserver microtask) unless
+	// another row opened or another control already holds focus.
+	useLayoutEffect(() => {
+		const wasEditing = wasEditingRef.current;
+		wasEditingRef.current = isEditing;
+		if (!wasEditing || isEditing || anotherRowOpen) return;
+		const target = actionRef.current;
+		if (!target || !isInteractionScopeEligible(target, interactions)) return;
+		const active = document.activeElement;
+		const anotherControlFocused =
+			active !== null &&
+			active.isConnected &&
+			active !== document.body &&
+			active !== document.documentElement &&
+			active.getAttribute("role") !== "dialog" &&
+			!rowRef.current?.contains(active);
+		if (!anotherControlFocused) target.focus();
+	}, [isEditing, anotherRowOpen, interactions]);
 
 	async function save() {
 		if (!value.trim() || busy) return;
@@ -204,9 +235,9 @@ function KeyTableRow({
 	// table-like"): the expanded row becomes the editor itself — label
 	// left, the paste field filling the middle, Save | Cancel (| Delete)
 	// right — instead of a second line beneath the row.
-	if (expanded && !envOwned) {
+	if (isEditing) {
 		return (
-			<div data-testid={testid}>
+			<div ref={rowRef} data-testid={testid}>
 				<div className="flex items-center gap-2 rounded-sm px-1 py-1.5" data-testid={`${testid}-editor`}>
 					<span className="shrink-0 font-ui text-xs text-foreground">{label}</span>
 					<input
@@ -262,35 +293,48 @@ function KeyTableRow({
 		);
 	}
 
+	const actionLabel = status.present ? "Edit" : "Add key";
+
 	return (
-		<div data-testid={testid} className={envOwned ? "opacity-40" : undefined}>
-			<button
-				type="button"
-				aria-expanded={expanded}
+		<div ref={rowRef} data-testid={testid} className={envOwned ? "opacity-40" : undefined}>
+			<div
 				data-testid={`${testid}-row`}
-				onClick={() => !envOwned && onToggle()}
-				className={`flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left ${
-					envOwned ? "cursor-default" : "cursor-pointer transition-colors hover:bg-accent/50"
-				}`}
+				className="flex items-center justify-between gap-3 rounded-sm px-1 py-1.5"
 			>
-				<span className="font-ui text-xs text-foreground">{label}</span>
-				<span className="flex items-center gap-2">
-					{docsUrl && (
+				<span className="min-w-0 truncate font-ui text-xs text-foreground">{label}</span>
+				<div className="flex shrink-0 items-center gap-2">
+					<span data-testid={`${testid}-status`} className="font-mono text-[11px] text-muted-foreground">
+						{keyStatusLine(status)}
+					</span>
+					{!envOwned && docsUrl && (
 						<a
 							href={docsUrl}
 							target="_blank"
 							rel="noreferrer"
-							onClick={(e) => e.stopPropagation()}
-							className="text-[10px] text-muted-foreground/60 underline-offset-2 hover:text-foreground hover:underline"
+							data-testid={`${testid}-get-key`}
+							aria-label={`Get key for ${label}`}
+							className="shrink-0 rounded-xs text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
 						>
-							key ↗
+							Get key <span aria-hidden="true">↗</span>
 						</a>
 					)}
-					<span data-testid={`${testid}-status`} className="font-mono text-[11px] text-muted-foreground">
-						{keyStatusLine(status)}
-					</span>
-				</span>
-			</button>
+					{!envOwned && (
+						<Button
+							ref={actionRef}
+							type="button"
+							size="xs"
+							variant="outline"
+							aria-expanded={false}
+							aria-label={status.present ? `Edit ${label} key` : `Add key for ${label}`}
+							data-testid={`${testid}-action`}
+							onClick={onToggle}
+							className="cursor-pointer"
+						>
+							{actionLabel}
+						</Button>
+					)}
+				</div>
+			</div>
 			{error && (
 				<p role="alert" data-testid={`${testid}-error`} className="pl-6 text-xs text-error">
 					{error}
@@ -387,9 +431,17 @@ export function KeysSection({
 	const [addingCustom, setAddingCustom] = useState(false);
 	const [customEditorMounted, setCustomEditorMounted] = useState(false);
 	const editorScopeRef = useRef<HTMLDivElement>(null);
+	const loaded = !loading && statuses !== null;
+	const classified = loaded ? classifyKeys(statuses, providers) : null;
+	const activeOpenRow =
+		openRow !== null && classified !== null
+			? [...classified.providerRows, ...classified.toolRows].find(
+					(status) => status.id === openRow && status.source !== "env",
+				)?.id ?? null
+			: null;
 	useInteractionLayer({
 		kind: "view", rootRef: editorScopeRef,
-		enabled: openRow !== null || adding !== null || addingCustom,
+		enabled: activeOpenRow !== null || adding !== null || addingCustom,
 		onClose: () => {
 			setOpenRow(null);
 			setAdding(null);
@@ -433,6 +485,12 @@ export function KeysSection({
 		if (initialRow !== undefined) setOpenRow(initialRow);
 	}, [initialRow]);
 
+	// Drop non-editable targets (such as env-owned deep links) once loaded so
+	// they cannot arm an invisible layer or open later if statuses refresh.
+	useEffect(() => {
+		if (loaded && openRow !== null && activeOpenRow === null) setOpenRow(null);
+	}, [loaded, openRow, activeOpenRow]);
+
 	async function saveKey(id: string, value: string): Promise<string | null> {
 		const res = await fetch(`/api/keys/${id}`, {
 			method: "PUT",
@@ -468,11 +526,11 @@ export function KeysSection({
 		return null;
 	}
 
-	if (loading || statuses === null) {
+	if (!classified) {
 		return <p className="px-6 py-5 text-xs text-muted-foreground/70">Loading keys…</p>;
 	}
 
-	const { providerRows, toolRows, unknownRows, addable } = classifyKeys(statuses, providers);
+	const { providerRows, toolRows, unknownRows, addable } = classified;
 
 	async function saveNewProvider(p: ProviderKeyInfo, value: string) {
 		const err = await saveKey(p.envVar, value);
@@ -483,27 +541,32 @@ export function KeysSection({
 		}
 	}
 
+	const renderKeyRow = (status: AuthKeyStatus, label: string) => (
+		<KeyTableRow
+			key={status.id}
+			label={label}
+			docsUrl={status.info?.docsUrl}
+			status={status}
+			expanded={activeOpenRow === status.id}
+			anotherRowOpen={activeOpenRow !== null && activeOpenRow !== status.id}
+			onToggle={() => setOpenRow(activeOpenRow === status.id ? null : status.id)}
+			onSave={async (v) => {
+				const err = await saveKey(status.id, v);
+				if (!err) setOpenRow((current) => (current === status.id ? null : current));
+				return err;
+			}}
+			onCancel={() => setOpenRow((current) => (current === status.id ? null : current))}
+			onDelete={() => deleteKey(status.id)}
+			testid={`key-${status.id.toLowerCase()}`}
+		/>
+	);
+
 	return (
 		<div ref={editorScopeRef} className="contents">
 			<SettingsGroup label="Model API keys" testid="group-provider-keys">
-				{providerRows.map((status) => (
-					<KeyTableRow
-						key={status.id}
-						label={providerKeyLabel(status.id, providers) ?? status.info?.label ?? status.id}
-						docsUrl={status.info?.docsUrl}
-						status={status}
-						expanded={openRow === status.id}
-						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
-						onSave={async (v) => {
-							const err = await saveKey(status.id, v);
-							if (!err) setOpenRow(null); // fold on success — rest state
-							return err;
-						}}
-						onCancel={() => setOpenRow(null)}
-						onDelete={() => deleteKey(status.id)}
-						testid={`key-${status.id.toLowerCase()}`}
-					/>
-				))}
+				{providerRows.map((status) =>
+					renderKeyRow(status, providerKeyLabel(status.id, providers) ?? status.info?.label ?? status.id),
+				)}
 				{custom?.baseUrl && (
 					<CustomEndpointRow
 						status={custom}
@@ -581,24 +644,9 @@ export function KeysSection({
 			</SettingsGroup>
 
 			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
-					<KeyTableRow
-						key={status.id}
-						label={status.info?.label ?? status.id}
-						docsUrl={status.info?.docsUrl}
-						status={status}
-						expanded={openRow === status.id}
-						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
-						onSave={async (v) => {
-							const err = await saveKey(status.id, v);
-							if (!err) setOpenRow(null);
-							return err;
-						}}
-						onCancel={() => setOpenRow(null)}
-						onDelete={() => deleteKey(status.id)}
-						testid={`key-${status.id.toLowerCase()}`}
-					/>
-				))}
+				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) =>
+					renderKeyRow(status, status.info?.label ?? status.id),
+				)}
 				{label === "Dictation" && <>
 					<DictationLanguageSetting />
 					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
