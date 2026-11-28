@@ -59,10 +59,46 @@ const SUMMARIZER_SYSTEM_PROMPT =
 /** The one-shot summary call: zero tools, one turn, text out. The engine
  *  is the chat's own conversation engine (owner ruling: the session's
  *  model writes its own summary). Injectable for tests. */
-export type Summarizer = (prompt: string, engine: PiEngine) => Promise<{ summary: string; usage: Usage }>;
+export type Summarizer = (prompt: string, engine: PiEngine, signal?: AbortSignal) => Promise<{ summary: string; usage: Usage }>;
+
+/** The gate holds every turn of the chat while a summary runs, so the summary
+ *  must be bounded: a stalled or very slow provider call fails the compaction
+ *  (record untouched, gate released) instead of freezing the session. */
+export const COMPACTION_SUMMARY_TIMEOUT_MS = 4 * 60_000;
+
+/** Condensing a transcript does not need deep deliberation. At "max" a 100k-token
+ *  span spent ~250 s in silent thinking before the first summary token (measured
+ *  with the Claude Code provider) — all of it behind the structural gate. */
+export const SUMMARIZER_MAX_THINKING_LEVEL = "medium";
+const THINKING_LEVEL_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** The chat's own engine with its thinking level capped for the summary call. */
+export function summarizerEngine(engine: PiEngine): PiEngine {
+	const cap = THINKING_LEVEL_ORDER.indexOf(SUMMARIZER_MAX_THINKING_LEVEL);
+	if (!engine.level || THINKING_LEVEL_ORDER.indexOf(engine.level) <= cap) return engine;
+	return { ...engine, level: SUMMARIZER_MAX_THINKING_LEVEL as PiEngine["level"] };
+}
+
+/** Race the summary against its deadline; on expiry abort the model call
+ *  (the Claude Code adapter kills its child on abort) and reject. */
+async function withSummaryDeadline<T>(run: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+	const controller = new AbortController();
+	let timer: NodeJS.Timeout | undefined;
+	const deadline = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			controller.abort();
+			reject(new Error(`Compaction summary timed out after ${Math.round(timeoutMs / 1000)}s`));
+		}, timeoutMs);
+	});
+	try {
+		return await Promise.race([run(controller.signal), deadline]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 /** The production summarizer over the sub-agent seam. */
-async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ summary: string; usage: Usage }> {
+async function subagentSummarizer(prompt: string, engine: PiEngine, signal?: AbortSignal): Promise<{ summary: string; usage: Usage }> {
 	let usage: Usage = {
 		input: 0,
 		output: 0,
@@ -78,7 +114,8 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 		// for a one-shot text job (the cast documents the dead path).
 		role: "researcher" as never,
 		prompt,
-		engine,
+		engine: summarizerEngine(engine),
+		abortSignal: signal,
 		systemPrompt: SUMMARIZER_SYSTEM_PROMPT,
 		// Operational work for the foreground conversation, not a worker task.
 		bypassWorkerRequestAdmission: true,
@@ -122,6 +159,8 @@ export interface CompactionDeps {
 	projectMessages?: (record: ChatRecord) => readonly LhMessage[];
 	/** Injectable summarizer (tests); default = the sub-agent one-shot. */
 	summarize?: Summarizer;
+	/** Deadline for one summary call (tests); default COMPACTION_SUMMARY_TIMEOUT_MS. */
+	summaryTimeoutMs?: number;
 }
 
 // ─── the registry (module-global on globalThis, jobs.ts's pattern) ─────────
@@ -242,7 +281,10 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	emit("compaction-changed", { chatId, running: true });
 	try {
 		const summarize = deps.summarize ?? subagentSummarizer;
-		const { summary, usage } = await summarize(prompt, deps.engine);
+		const { summary, usage } = await withSummaryDeadline(
+			(signal) => summarize(prompt, deps.engine, signal),
+			deps.summaryTimeoutMs ?? COMPACTION_SUMMARY_TIMEOUT_MS,
+		);
 		const trimmed = summary.trim();
 		if (!trimmed) return; // an empty summary is a refusal artifact — leave the record honest
 

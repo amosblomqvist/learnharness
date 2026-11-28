@@ -102,6 +102,12 @@ coverage: [reasoning accounting](../tests/compaction-reasoning.test.ts),
 [Settings toggle](../tests/render-settings.test.tsx). The comparison uses a fixed
 synthetic summary and saved usage; it does not measure real provider input.
 
+### Summary deadline and thinking level
+
+Every turn of a chat waits for a running compaction, so one summary call is bounded. A summary that has not returned within **four minutes** is aborted: the compaction fails, saved history and any prior summary stay untouched, and the waiting turn proceeds. The next turn-start gate retries.
+
+The summary is still written by the session's own conversation model, but its thinking level is capped at **medium**. At `max`, a long span can spend minutes in thinking before the first summary token, all of it behind the gate. Regression coverage: [summary deadline](../tests/compaction-deadline.test.ts).
+
 ### Implementation references
 
 Implementation: [`server/compaction.ts`](../src/server/compaction.ts), [`context-usage.ts`](../src/core/context-usage.ts), [`server/pricing.ts`](../src/server/pricing.ts). Regressions: `compaction-native-parity`, `context-usage`, `pricing-native-parity`, `subscription-usage`, and `session-cache-hit-rate` under `tests/`, plus CLI/custom-provider suites.
