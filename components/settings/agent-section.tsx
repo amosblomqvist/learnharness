@@ -29,7 +29,9 @@
  * in the Tools group, with the same shared-menu look and
  * the live reason line from /api/search. No engine key at all → the row
  * grays whole-row (a choice without a key would only BLOCK another
- * engine's auto-activation).
+ * engine's auto-activation). A keyless engine (OpenAI web search) is the
+ * exception: it is offered while the current settings can run it, and
+ * never auto-activates.
  *
  * Tools — the owner's final list (2026-09-19): research, demo, visual, pdf.
  * Absent key = enabled in the schema; the UI writes explicit booleans for
@@ -66,6 +68,7 @@ import {
 	COMPACTION_THRESHOLD_FLOOR,
 	MODEL_SLOTS,
 	SEARCH_ENGINES,
+	resolveModelSpec,
 	resolveSettings,
 	isFileAccessFolder,
 	type AgentSettings,
@@ -74,13 +77,14 @@ import {
 	type ModelSlotName,
 	type ModelsSettings,
 	type SearchEngineId,
+	type SearchStatus,
 } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsRow, SettingsMenuTrigger, SettingsSegmentedControl, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
-import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
+import { ChatGPTBackgroundAccess, useChatGPTBackgroundAllowed } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
 
 /** One slot's display identity — the tier's roster as the row hint rides
@@ -398,7 +402,7 @@ export function AgentSection({
 	/** The live search state (/api/search) — the row's reason line. */
 	const [folderInput, setFolderInput] = useState("");
 	const [folderError, setFolderError] = useState<string | null>(null);
-	const [search, setSearch] = useState<{ available: boolean; engine: string | null; reason: string } | null>(null);
+	const [search, setSearch] = useState<SearchStatus | null>(null);
 	/** Which search engines have a key (/api/keys) — the no-keys-anywhere
 	 *  state grays the row; per-engine marks ride the menu rows. */
 	const [engineKeys, setEngineKeys] = useState<Partial<Record<SearchEngineId, boolean>>>({});
@@ -422,7 +426,7 @@ export function AgentSection({
 	const refreshSearch = () =>
 		fetch("/api/search")
 			.then((r) => r.json())
-			.then((body: { available: boolean; engine: string | null; reason: string }) => setSearch(body))
+			.then((body: SearchStatus) => setSearch(body))
 			.catch(() => setSearch(null));
 
 	/** Re-read the prompt-segment view — the signal seam for the
@@ -466,7 +470,7 @@ export function AgentSection({
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
 				const present: Partial<Record<SearchEngineId, boolean>> = {};
 				for (const { id, envVar } of SEARCH_ENGINES) {
-					present[id] = body.keys.some((k) => k.id === envVar && k.present);
+					if (envVar) present[id] = body.keys.some((k) => k.id === envVar && k.present);
 				}
 				setEngineKeys(present);
 			})
@@ -477,10 +481,14 @@ export function AgentSection({
 	// The reason line re-reads /api/search AFTER an engine write lands —
 	// the write updates the `agent` prop (the dialog's record mirror), so
 	// keying on the pin avoids the race where the fetch beat the PUT and
-	// the hint contradicted the trigger it sits under.
+	// the hint contradicted the trigger it sits under. The researcher's
+	// provider and ChatGPT background consent are keyed the same way: they
+	// decide whether a keyless engine is offered and ready.
+	const researcherProvider = resolveModelSpec("researcher", agent?.models?.researcher, models)?.provider;
+	const chatGPTBackground = useChatGPTBackgroundAllowed();
 	useEffect(() => {
 		refreshSearch();
-	}, [agent?.search?.engine]);
+	}, [agent?.search?.engine, researcherProvider, chatGPTBackground]);
 
 	// The dropdown contract (the chat model selector's, mirrored): any
 	// click outside the open menu — or an Esc — closes it. Esc is CLAIMED
@@ -566,12 +574,13 @@ export function AgentSection({
 		return outcome;
 	}
 
-		/** The search-engine menu row — label + the quiet live-key mark. */
+		/** The search-engine menu row — label + the quiet readiness mark
+		 *  (null = Automatic, which only ticks when active). */
 	const engineOption = (
 		id: SearchEngineId | "auto",
 		label: string,
 		active: boolean,
-		live: boolean | null,
+		mark: string | null,
 		onPick: () => void,
 	) => (
 		<button
@@ -585,7 +594,7 @@ export function AgentSection({
 		>
 			<span>{label}</span>
 			<span className="text-muted-foreground">
-				{live === null ? (active && <span aria-hidden>✓</span>) : live ? <span aria-hidden>✓ key</span> : <span aria-hidden>· no key</span>}
+				{(mark ?? active) && <span aria-hidden>{mark ?? "✓"}</span>}
 			</span>
 		</button>
 	);
@@ -877,14 +886,18 @@ export function AgentSection({
 				})()}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
-					const anyKey = SEARCH_ENGINES.some(({ id }) => engineKeys[id] === true);
+					// A keyless engine is offered while the current settings can run
+					// it, and stays listed while it is the saved choice.
+					const offered = SEARCH_ENGINES.filter(({ id, envVar }) =>
+						envVar !== null || engine === id || (search?.keyless?.[id] ?? "unsupported") !== "unsupported");
+					const usable = offered.some(({ id, envVar }) => envVar === null || engineKeys[id] === true);
 					const open = openMenu?.target === "search";
 					return (
 						<SettingsRow
 							label="Search engine"
 							hint={search?.reason ?? undefined}
 							testid="search-engine-row"
-							dimmed={!anyKey}
+							dimmed={!usable}
 						>
 							<span ref={open ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
 								<MenuTrigger
@@ -895,7 +908,7 @@ export function AgentSection({
 									open={open}
 									onClick={() => setOpenMenu(open ? null : { target: "search", kind: "engine" })}
 									widthClass="min-w-20"
-									disabled={!anyKey}
+									disabled={!usable}
 								/>
 								{open && (
 									<MenuShell
@@ -909,12 +922,15 @@ export function AgentSection({
 											onSectionChange(composeSearchEngine(agent, null));
 											setOpenMenu(null);
 										})}
-										{SEARCH_ENGINES.map(({ id, label }) =>
-											engineOption(id, label, engine === id, engineKeys[id] ?? false, () => {
+										{offered.map(({ id, label, envVar }) => {
+											const mark = envVar !== null
+												? engineKeys[id] ? "✓ key" : "· no key"
+												: search?.keyless?.[id] === "ready" ? "✓ available" : "· unavailable";
+											return engineOption(id, label, engine === id, mark, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);
-											}),
-										)}
+											});
+										})}
 									</MenuShell>
 								)}
 							</span>

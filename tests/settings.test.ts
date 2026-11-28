@@ -217,6 +217,8 @@ describe("sanitizeUserSettings", () => {
 		assert.deepEqual(fc?.agent?.search, { engine: "firecrawl" });
 		const ollama = sanitizeUserSettings({ version: 1, agent: { search: { engine: "ollama" } } });
 		assert.deepEqual(ollama?.agent?.search, { engine: "ollama" });
+		const openai = sanitizeUserSettings({ version: 1, agent: { search: { engine: "openai" } } });
+		assert.deepEqual(openai?.agent?.search, { engine: "openai" });
 		const bad = sanitizeUserSettings({ version: 1, agent: { search: { engine: "google" } } });
 		assert.equal(bad?.agent?.search, undefined);
 		const notObject = sanitizeUserSettings({ version: 1, agent: { search: "tavily" } });

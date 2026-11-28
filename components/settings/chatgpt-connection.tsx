@@ -346,6 +346,10 @@ export function ChatGPTConnection({ labelClassName }: { setup?: boolean; labelCl
 	</div>;
 }
 
+/** Background consent as the UI last saw it: readers that depend on it re-read when it flips. */
+export function useChatGPTBackgroundAllowed(): boolean {
+	return useContext(Context).status.allowBackgroundUse;
+}
 /** Contextual consent discovery belongs beside background model choices only. */
 export function ChatGPTBackgroundAccess({ provider }: { provider: string | undefined }) {
 	const ui = useContext(Context);

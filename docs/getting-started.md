@@ -13,7 +13,7 @@ Open **Settings → Providers** and configure a connection:
 
 Choose **Strong**, **Cheap**, and **Vision** models in Settings. There are no factory model selections. New sessions start with Strong; background roles use their assigned slots or role overrides. A model selected inside an existing session belongs to that session and does not change background-role choices.
 
-Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation has its own service key below.
+Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. If the researcher's model uses an OpenAI API key or a ChatGPT connection (not OpenAI models reached through another provider), you can choose OpenAI web search in Settings → Agent → Search engine instead: it needs no search key, runs each search as an extra call on that model, and is never selected automatically. Research can still fetch known URLs without a search key. Dictation has its own service key below.
 
 ## Start a session
 

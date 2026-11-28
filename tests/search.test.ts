@@ -2,7 +2,8 @@
  * The search engines (search port + model slots wave, 2026-09-20):
  * engine resolution (the owner's auto-detect decision — a key is enough,
  * no engine choice needed; explicit pin requires the key; no silent
- * fallback) + the search adapters against a STUB fetch (never the
+ * fallback; OpenAI web search is keyless and only ever an explicit
+ * choice) + the search adapters against a STUB fetch (never the
  * network — the wire shapes are verified against the published docs, and
  * the tests pin those shapes).
  *
@@ -11,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, openAIProvider, type KeylessState } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
@@ -285,17 +286,20 @@ describe("ollamaProvider (hosted search only)", () => {
 	});
 });
 
-describe("five-engine catalog and resolution", () => {
+const KEYED_ENGINES = SEARCH_ENGINES.flatMap((engine) => engine.envVar ? [engine] : []);
+
+describe("engine catalog and keyed resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(KEYED_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id).slice(KEYED_ENGINES.length), ["openai"]);
 		assert.equal(isSearchEngineId("chatgpt"), false);
 		assert.equal(isSearchEngineId("deepseek"), false);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
 	});
 
 	it("resolves every combination of configured keys without changing precedence", () => {
-		for (let mask = 0; mask < 2 ** SEARCH_ENGINES.length; mask++) {
-			const configured = SEARCH_ENGINES.filter((_, index) => mask & (1 << index));
+		for (let mask = 0; mask < 2 ** KEYED_ENGINES.length; mask++) {
+			const configured = KEYED_ENGINES.filter((_, index) => mask & (1 << index));
 			const keys = Object.fromEntries(configured.map(({ id }) => [id, `fake-${id}`]));
 			const result = resolveSearchEngineFor(undefined, keys);
 			assert.equal(result.engine, configured[0]?.id ?? null, `key mask ${mask}`);
@@ -303,9 +307,9 @@ describe("five-engine catalog and resolution", () => {
 		}
 	});
 
-	for (const { id, envVar } of SEARCH_ENGINES) {
+	for (const { id, envVar } of KEYED_ENGINES) {
 		it(`${id}: an explicit pin wins, but a missing pinned key never falls back`, () => {
-			const keys: Partial<Record<SearchEngineId, string>> = Object.fromEntries(SEARCH_ENGINES.map(({ id }) => [id, `fake-${id}`]));
+			const keys: Partial<Record<SearchEngineId, string>> = Object.fromEntries(KEYED_ENGINES.map(({ id }) => [id, `fake-${id}`]));
 			assert.equal(resolveSearchEngineFor(id, keys).engine, id);
 			delete keys[id];
 			const missing = resolveSearchEngineFor(id, keys);
@@ -365,4 +369,100 @@ it("Firecrawl drops invalid result rows and normalizes only search descriptions"
 		{ title: "https://example.org", url: "https://example.org", snippet: "x".repeat(500) },
 		{ title: "https://example.com", url: "https://example.com", snippet: "" },
 	]);
+});
+
+describe("OpenAI web search: resolution", () => {
+	const ready: { openai: KeylessState } = { openai: { readiness: "ready" } };
+	const blocked: { openai: KeylessState } = { openai: { readiness: "blocked", reason: "ChatGPT background use is off" } };
+
+	it("is never chosen automatically, with or without keys", () => {
+		const keyless = resolveSearchEngineFor(undefined, {}, ready);
+		assert.equal(keyless.available, false);
+		assert.equal(keyless.engine, null);
+		assert.match(keyless.reason, /or choose OpenAI$/);
+		assert.equal(resolveSearchEngineFor(undefined, { ollama: "fake-ollama", openai: "not-a-key" }, ready).engine, "ollama");
+		assert.equal(resolveSearchEngineFor(undefined, { openai: "not-a-key" }, ready).available, false);
+		assert.doesNotMatch(resolveSearchEngineFor(undefined, {}, blocked).reason, /OpenAI$/);
+	});
+
+	it("runs when chosen and ready, even beside keyed engines", () => {
+		const chosen = resolveSearchEngineFor("openai", { tavily: "fake-tavily" }, ready);
+		assert.deepEqual(chosen, { available: true, engine: "openai", reason: "search engine: openai (chosen)", key: null, keyless: { openai: "ready" } });
+	});
+
+	it("chosen but not ready is unavailable with the cause and never falls back to a keyed engine", () => {
+		for (const state of [blocked, undefined]) {
+			const result = resolveSearchEngineFor("openai", { tavily: "fake-tavily" }, state);
+			assert.equal(result.available, false);
+			assert.equal(result.engine, null);
+		}
+		assert.equal(resolveSearchEngineFor("openai", {}, blocked).reason, 'search engine is set to "openai" but ChatGPT background use is off');
+		assert.equal(resolveSearchEngineFor("openai", {}).reason, 'search engine is set to "openai" but it cannot run with the current settings');
+	});
+
+	it("reports readiness whichever engine is active", () => {
+		assert.equal(resolveSearchEngineFor(undefined, { tavily: "fake-tavily" }, ready).keyless.openai, "ready");
+		assert.equal(resolveSearchEngineFor("brave", {}, blocked).keyless.openai, "blocked");
+		assert.equal(resolveSearchEngineFor(undefined, {}).keyless.openai, "unsupported");
+	});
+});
+
+describe("OpenAI web search: adapter", () => {
+	/** Build an answer from sentences and the pages cited after each. */
+	const answered = (parts: [string, ...string[]][], separator = "\n") => {
+		let text = "";
+		const annotations: object[] = [];
+		for (const [sentence, ...urls] of parts) {
+			text += `${text ? separator : ""}${sentence}`;
+			for (const url of urls) {
+				const start_index = text.length + 1;
+				text += ` ([${new URL(url).hostname}](${url}))`;
+				annotations.push({ type: "url_citation", title: new URL(url).hostname, url, start_index, end_index: text.length });
+			}
+		}
+		return { type: "message", content: [{ type: "output_text", text, annotations: [...annotations, { type: "file_citation" }, null] }] };
+	};
+	const searched = (...urls: unknown[]) => ({ type: "web_search_call", status: "completed", action: { type: "search", sources: urls.map((url) => ({ type: "url", url })) } });
+	const search = (output: unknown[], count = 5) => openAIProvider(async () => output).search("q", count);
+
+	it("lists cited pages with the passage each supports, then the uncited sources", async () => {
+		const output = [
+			searched("https://beta.example/b", "https://gamma.example/c", "ftp://gamma.example/c", undefined),
+			null,
+			answered([["- Alpha explains the first idea.", "https://alpha.example/a?utm_source=openai"], ["- Beta covers the second.", "https://beta.example/b", "https://alpha.example/a?utm_source=openai", "https://delta.example/d?utm_source=newsletter"]]),
+		];
+		assert.deepEqual(await search(output), [
+			{ title: "alpha.example", url: "https://alpha.example/a", snippet: "- Alpha explains the first idea." },
+			{ title: "beta.example", url: "https://beta.example/b", snippet: "- Beta covers the second." },
+			{ title: "delta.example", url: "https://delta.example/d?utm_source=newsletter", snippet: "- Beta covers the second." },
+			{ title: "https://gamma.example/c", url: "https://gamma.example/c", snippet: "" },
+		]);
+		assert.equal((await search(output, 2)).length, 2, "rows stop at the requested count");
+	});
+
+	it("gives each citation its own passage in a single-paragraph answer", async () => {
+		assert.deepEqual((await search([answered([["Alpha says X.", "https://alpha.example/a"], ["Beta says Y.", "https://beta.example/b"]], " ")])).map(({ snippet }) => snippet), ["Alpha says X.", "Beta says Y."]);
+	});
+
+	it("leaves an introduction above the first result out of its passage", async () => {
+		assert.deepEqual((await search([answered([["Here are the 2 most relevant results:\n\n- Alpha says X.", "https://alpha.example/a"], ["- Beta says Y.", "https://beta.example/b"]])])).map(({ snippet }) => snippet), ["- Alpha says X.", "- Beta says Y."]);
+	});
+
+	it("tolerates citations without positions and an answer that searched nothing", async () => {
+		const bare = { type: "message", content: [{ type: "output_text", text: "Alpha says X.", annotations: [{ type: "url_citation", title: "Alpha", url: "https://alpha.example/a" }] }] };
+		assert.deepEqual(await search([bare]), [{ title: "Alpha", url: "https://alpha.example/a", snippet: "" }]);
+		assert.deepEqual(await search([{ type: "reasoning" }, { type: "message", content: [{ type: "output_text", text: "nothing" }] }]), []);
+	});
+
+	it("asks for two minutes per search, which no keyed engine does", () => {
+		assert.equal(openAIProvider().timeoutMs, 120_000);
+		for (const provider of [tavilyProvider("k"), braveProvider("k"), exaProvider("k"), firecrawlProvider("k"), ollamaProvider("k")]) assert.equal(provider.timeoutMs, undefined);
+	});
+
+	it("passes the caller's query, count and job context through", async () => {
+		const context = { signal: new AbortController().signal, model: { provider: "openai", id: "scratch-model" }, onUsage: () => {} };
+		const calls: unknown[][] = [];
+		await openAIProvider(async (...args) => { calls.push(args); return []; }).search("solar storms", 3, context);
+		assert.deepEqual(calls, [["solar storms", 3, context]]);
+	});
 });
