@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch } from "../subagents/pdf-ops.ts";
-import { safeFetch } from "./safe-fetch.ts";
+import { readBoundedBytes, safeFetch } from "./safe-fetch.ts";
 
 /**
  * PDF reading tools for the RESEARCHER sub-agent (owner design B,
@@ -124,11 +124,8 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 					if (!/application\/pdf/i.test(contentType) && !/\.pdf(\?|$)/i.test(parsedPathname(url))) {
 						throw new Error(`Not a PDF (content-type ${contentType.split(";")[0] || "unknown"})`);
 					}
-					const declared = Number(resp.headers.get("content-length") ?? 0);
-					if (declared > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
-					const bytes = new Uint8Array(await resp.arrayBuffer());
+					const bytes = await readBoundedBytes(resp, MAX_PDF_BYTES, "PDF too large (over 25 MB)");
 					if (bytes.length === 0) throw new Error("Empty response");
-					if (bytes.length > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
 					const filePath = path.join(dir, pdfFileName(url));
 					await fs.writeFile(filePath, bytes);
 					try {
