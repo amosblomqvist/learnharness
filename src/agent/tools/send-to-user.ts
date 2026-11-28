@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { SEND_TO_USER_TOOL } from "../../core/native-messages.ts";
+import { AGY_PROVIDER } from "../../core/contracts/agy.ts";
 import { CLAUDE_CODE_PROVIDER } from "../claude-code/constants.ts";
 import { serverExecute } from "../tool-execute.ts";
 
@@ -8,7 +9,7 @@ import { serverExecute } from "../tool-execute.ts";
  *  into thinking). Matches Claude across providers (including OpenRouter),
  *  not the API transport. The side-question agent uses this directly. */
 export function needsSendToUser(model: { provider: string; id: string }): boolean {
-	return model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude");
+	return model.provider !== AGY_PROVIDER && (model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude"));
 }
 
 /** One availability rule for the tool and its teacher-only delivery guard.
