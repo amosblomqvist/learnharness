@@ -392,9 +392,15 @@ export function createQuestionProbe(parts: QuestionParts, host: HTMLElement = pa
 		let widest = 0;
 		for (const svg of live.querySelectorAll<SVGSVGElement>(MEDIA_SVG)) {
 			// The holder's font-parity cap (md-blocks) is the chart's size at
-			// the reading font; mermaid's own inline cap is the fallback.
-			const holder = svg.parentElement?.style.maxWidth ?? "";
-			const capped = holder.endsWith("px") ? parseFloat(holder) : 0;
+			// the reading font (`em` or `px`); mermaid's own inline cap is the fallback.
+			const holderEl = svg.parentElement;
+			const holder = holderEl?.style.maxWidth ?? "";
+			const holderFs = holderEl && holder.endsWith("em") ? parseFloat(getComputedStyle(holderEl).fontSize) : 0;
+			const capped = holder.endsWith("px")
+				? parseFloat(holder)
+				: holder.endsWith("em") && Number.isFinite(holderFs) && holderFs > 0
+					? parseFloat(holder) * holderFs
+					: 0;
 			const inline = svg.style.maxWidth.endsWith("px") ? parseFloat(svg.style.maxWidth) : 0;
 			const natural = capped > 0 ? capped : inline > 0 ? inline : svg.viewBox?.baseVal?.width ?? 0;
 			if (natural > widest) widest = natural;

@@ -83,6 +83,19 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Chat diagrams (Pele): bind to house tokens so dark, light, and custom
+	   themes cascade into SVGs without re-rendering. */
+	--pele-bg: var(--background);
+	--pele-fg: var(--foreground);
+	--pele-muted: var(--muted-foreground);
+	--pele-line: var(--lh-line-strong);
+	--pele-surface: var(--card);
+	--pele-surface-alt: var(--accent);
+	--pele-border: var(--border);
+	--pele-accent: var(--lh-accent);
+	--pele-font: var(--font-prose);
+	--pele-font-mono: var(--font-mono);
+	--pele-radius: var(--radius);
 }
 
 /* The light variant: the colors come from the active light theme (inline
@@ -305,11 +318,120 @@ body {
 	--color-sidebar: var(--card);
 }
 
-/* Mermaid diagrams: keep wide charts inside the content column. Mermaid
- * inlines a px max-width on the svg, so !important is required to win. */
+/* Chat diagrams (Pele): fill the em-capped holder so Reading sizes above 16px
+ * scale diagrams proportionally while narrow columns still shrink via max-width.
+ * Re-declare --pele-font locally so nested .lh-prose scopes cascade accurately. */
+[data-streamdown="mermaid"],
+[data-lh-overlay-chart] {
+	--pele-font: var(--font-prose);
+}
 [data-streamdown="mermaid"] svg {
 	max-width: 100% !important;
 	height: auto !important;
+}
+[data-streamdown="mermaid"] svg.pele {
+	width: 100% !important;
+}
+
+/* TeX math inside Pele diagrams (Temml MathML Core): scoped strictly under
+ * .pele-math so nothing leaks to global <math> elements. Uses OS OpenType
+ * MATH fonts and inherits --pele-fg via currentColor. */
+.pele-math math {
+	font-family: "Cambria Math", "STIXTwoMath-Regular", "STIX Two Math", "NotoSansMath-Regular", math;
+	font-style: normal;
+	font-weight: normal;
+	line-height: normal;
+	font-size-adjust: none;
+	color: inherit;
+	text-indent: 0;
+	text-transform: none;
+	letter-spacing: normal;
+	word-wrap: normal;
+	direction: ltr;
+	font-feature-settings: "dtls" off;
+}
+.pele-math math * {
+	border-color: currentColor;
+}
+.pele-math mfrac > :nth-child(2),
+.pele-math msqrt,
+.pele-math mover > :first-child {
+	math-shift: compact;
+}
+.pele-math .menclose {
+	display: inline-block;
+	position: relative;
+	padding: 0.5ex 0;
+}
+.pele-math .tml-right {
+	text-align: right;
+}
+.pele-math .tml-left {
+	text-align: left;
+}
+.pele-math mtable.tml-jot > mtr > mtd {
+	padding-top: 0.7ex;
+	padding-bottom: 0.7ex;
+}
+.pele-math mtable.tml-small mtd {
+	padding-top: 0.35ex;
+	padding-bottom: 0.35ex;
+}
+@supports (not (-moz-appearance: none)) {
+	.pele-math .tml-sml-pad { padding-left: 0.05em; }
+	.pele-math .tml-med-pad { padding-left: 0.1em; }
+	.pele-math .tml-lrg-pad { padding-left: 0.15em; }
+}
+@supports (-moz-appearance: none) {
+	.pele-math .tml-vec { transform: scale(0.75); }
+}
+@supports (-webkit-backdrop-filter: blur(1px)) {
+	.pele-math .wbk-acc { transform: translate(0, 0.431em); }
+	.pele-math .wbk-sml { transform: translate(0.07em, 0); }
+	.pele-math .wbk-sml-acc { transform: translate(0.07em, 0.431em); }
+	.pele-math .wbk-sml-vec { transform: scale(0.75) translate(0.07em, 0); }
+	.pele-math .wbk-med { transform: translate(0.14em, 0); }
+	.pele-math .wbk-med-acc { transform: translate(0.14em, 0.431em); }
+	.pele-math .wbk-med-vec { transform: scale(0.75) translate(0.14em, 0); }
+	.pele-math .wbk-lrg { transform: translate(0.21em, 0); }
+	.pele-math .wbk-lrg-acc { transform: translate(0.21em, 0.431em); }
+	.pele-math .wbk-lrg-vec { transform: scale(0.75) translate(0.21em, 0); }
+}
+/* Chromium-only Temml fallbacks (MathML Core dropped <menclose> and accent sizing;
+ * gating avoids double-drawn borders/lines in Safari and Firefox). */
+@supports (not (-webkit-backdrop-filter: blur(1px))) and (not (-moz-appearance: none)) {
+	.pele-math .chr-sml { transform: translate(0.07em, 0); }
+	.pele-math .chr-sml-vec { transform: scale(0.75) translate(0.07em, 0); }
+	.pele-math .chr-med { transform: translate(0.14em, 0); }
+	.pele-math .chr-med-vec { transform: scale(0.75) translate(0.14em, 0); }
+	.pele-math .chr-lrg { transform: translate(0.21em, 0); }
+	.pele-math .chr-lrg-vec { transform: scale(0.75) translate(0.21em, 0); }
+	.pele-math menclose { position: relative; padding: 0.5ex 0; }
+	.pele-math .tml-fbox { padding: 3pt; border: 1px solid; }
+	.pele-math .tml-overline { padding-top: 0.1em; border-top: 0.065em solid; }
+	.pele-math .tml-underline { padding-bottom: 0.1em; border-bottom: 0.065em solid; }
+	.pele-math .tml-cancel {
+		display: inline-block;
+		position: absolute;
+		left: 0.5px;
+		bottom: 0;
+		width: 100%;
+		height: 100%;
+		background-color: currentColor;
+	}
+	.pele-math .upstrike { clip-path: polygon(0.05em 100%, 0 calc(100% - 0.05em), calc(100% - 0.05em) 0, 100% 0.05em); }
+	.pele-math .downstrike { clip-path: polygon(0 0.05em, 0.05em 0, 100% calc(100% - 0.05em), calc(100% - 0.05em) 100%); }
+	.pele-math .sout { clip-path: polygon(0 calc(55% + 0.0333em), 0 calc(55% - 0.0333em), 100% calc(55% - 0.0333em), 100% calc(55% + 0.0333em)); }
+	.pele-math .tml-xcancel { clip-path: polygon(0.05em 0, 0 0.05em, calc(50% - 0.05em) 50%, 0 calc(100% - 0.05em), 0.05em 100%, 50% calc(50% + 0.05em), calc(100% - 0.05em) 100%, 100% calc(100% - 0.05em), calc(50% + 0.05em) 50%, 100% 0.05em, calc(100% - 0.05em) 0, 50% calc(50% - 0.05em)); }
+	.pele-math .tml-tilde-2 { transform: scale(2.0, 1.1); }
+	.pele-math .tml-tilde-3 { transform: scale(3.0, 1.1); }
+	.pele-math .tml-tilde-4 { transform: scale(4.0, 1.1); }
+	.pele-math .tml-hat-1 { transform: scale(1.9, 1.0); }
+	.pele-math .tml-hat-2 { transform: scale(3.9, 1.0); }
+	.pele-math .tml-hat-3 { transform: scale(5.8, 1.0); }
+	.pele-math .tml-hat-4 { transform: scale(7.8, 1.0); }
+	.pele-math .tml-right { text-align: -webkit-right; }
+	.pele-math .tml-left { text-align: -webkit-left; }
 }
 
 /* Display math: long equations scroll instead of overflowing the column. */
