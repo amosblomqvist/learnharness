@@ -26,6 +26,7 @@ import { parseStreamingJson, parseToolCallArguments } from "@earendil-works/pi-a
 
 import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
+import { reportStreamActivity } from "../stream-watchdog.ts";
 import { offerWorkerContinuation } from "../worker-request-admission.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
@@ -641,8 +642,17 @@ class ClaudeProcess implements LiveProcess {
 			return;
 		}
 		if (event.type === "messageStart") this.contextProbe?.refresh();
+		const wasStarted = this.turn.started;
 		this.turn.handle(event);
 		if (this.turn.finished) { this.kill(); return; }
+		if (event.type === "toolInputDelta"
+			|| (event.type === "blockStart" && event.block.type === "toolUse")
+			|| event.type === "blockStop"
+			|| event.type === "messageDelta") {
+			reportStreamActivity(this.signal, "content");
+		} else if (event.type === "messageAbandoned" || (event.type === "messageStart" && wasStarted)) {
+			reportStreamActivity(this.signal, "progress");
+		}
 		if (event.type === "messageStop" && this.turn.waitingForAdmission) {
 			const intents = this.turn.getIntents();
 			// Only rejected bare calls: keep the turn open for the model's retry in its next message.

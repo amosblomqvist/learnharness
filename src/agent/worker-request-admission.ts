@@ -81,6 +81,18 @@ export function offerWorkerContinuation(signal: AbortSignal | undefined, offer: 
 	if (request) request.offer = offer;
 }
 
+/** Bridge a wrapper's inner AbortSignal to the outer request's continuation slot
+ * so intermediate layers (such as the stream inactivity watchdog) preserve
+ * parked-child handoff without knowing about provider internals. */
+export function forwardWorkerContinuation(outer: AbortSignal | undefined, inner: AbortSignal): () => void {
+	const request = outer && continuations.get(outer);
+	if (!request) return () => {};
+	continuations.set(inner, request);
+	return () => {
+		if (continuations.get(inner) === request) continuations.delete(inner);
+	};
+}
+
 /** One pull-through consumer, no copied event queue. Native producers retain
  * their own buffering; result-only callers drain and discard rather than retain.
  * Source result observation is independent of downstream iteration, so a paused
