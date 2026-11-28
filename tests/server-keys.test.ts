@@ -41,6 +41,8 @@ for (const varName of [
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-server-keys-"));
 const AUTH = path.join(TMP, "auth.json");
 process.env.LH_AUTH_FILE = AUTH;
+// The route test below imports the server barrel; keep its data dir here too.
+process.env.LH_DATA_DIR = TMP;
 
 // The file BEFORE first boot: a shadowed OpenRouter (env will differ) + an
 // unknown var that must survive every write and surface as a generic row.
@@ -66,6 +68,7 @@ after(() => {
 	delete process.env.OPENROUTER_API_KEY;
 	delete process.env.DEEPGRAM_API_KEY;
 	delete process.env.OPENAI_API_KEY;
+	delete process.env.TAVILY_API_KEY;
 	fs.rmSync(TMP, { recursive: true, force: true });
 });
 
@@ -220,5 +223,38 @@ describe("resolveKeyStatuses (pure projection)", () => {
 		assert.ok(row, "the curated id is always in the projection");
 		assert.equal(row.source, "env");
 		assert.ok(!row.shadowedByEnv, "same value both places: redundant, not shadowed");
+	});
+});
+
+// Issue #523: one typo in auth.json must not let a save wipe the other keys.
+describe("corrupt auth.json: saves and deletes fail, nothing changes", () => {
+	const value = "d".repeat(40); // throwaway, ≥ Deepgram floor
+	const damaged = '{\n\t"DEEPGRAM_API_KEY": "' + value + '",\n\t"FUTURE_PLANS_TOKEN": "opaque-plans-token",\n}\n';
+
+	it("saveKey / deleteKey throw; file bytes and env copy are kept", () => {
+		assert.ok(saveKey("DEEPGRAM_API_KEY", value).ok);
+		fs.writeFileSync(AUTH, damaged);
+		assert.throws(() => saveKey("TAVILY_API_KEY", "tvly-throwaway-0123456789"), /storage unavailable/);
+		assert.equal(process.env.TAVILY_API_KEY, undefined, "a failed save is not reflected");
+		assert.throws(() => deleteKey("DEEPGRAM_API_KEY"), /storage unavailable/);
+		assert.equal(process.env.DEEPGRAM_API_KEY, value, "a failed delete keeps the live key");
+		assert.equal(fs.readFileSync(AUTH, "utf8"), damaged);
+	});
+
+	it("PUT / DELETE /api/keys/:id answer 500 with an error body", async () => {
+		const route = await import("../app/api/keys/[id]/route.ts");
+		fs.writeFileSync(AUTH, damaged);
+		const params = (id: string) => ({ params: Promise.resolve({ id }) });
+		const put = await route.PUT(
+			new Request("http://localhost/api/keys/TAVILY_API_KEY", { method: "PUT", body: JSON.stringify({ value: "tvly-throwaway-0123456789" }) }),
+			params("TAVILY_API_KEY"),
+		);
+		assert.equal(put.status, 500);
+		assert.match((await put.json()).error, /No changes were saved/);
+		const del = await route.DELETE(new Request("http://localhost/api/keys/DEEPGRAM_API_KEY", { method: "DELETE" }), params("DEEPGRAM_API_KEY"));
+		assert.equal(del.status, 500);
+		assert.match((await del.json()).error, /No changes were saved/);
+		assert.equal(fs.readFileSync(AUTH, "utf8"), damaged);
+		assert.equal(process.env.DEEPGRAM_API_KEY, value);
 	});
 });
