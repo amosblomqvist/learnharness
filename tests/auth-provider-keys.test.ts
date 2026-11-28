@@ -23,6 +23,7 @@ import { describe, it } from "node:test";
 import { AUTH_PROVIDER_KEYS, isProviderEnvVar } from "../src/core/auth-keys.ts";
 import { builtinProviders } from "../node_modules/@earendil-works/pi-ai/dist/providers/all.js";
 import { findEnvKeys } from "../node_modules/@earendil-works/pi-ai/dist/env-api-keys.js";
+import { antigravityProvider } from "../electron/antigravity-provider.cjs";
 
 /** pi-ai reads anthropic via AUTH_TOKEN/OAUTH_TOKEN alternates too — those
  *  stay env-only by owner spec; asserted absent below. */
@@ -47,8 +48,8 @@ const truthyEnv = new Proxy({} as Record<string, string>, {
 /** The truth, derived from pi-ai at test time. */
 function deriveProviders() {
 	const rows: Array<{ id: string; envVar: string; label: string }> = [];
-	for (const p of builtinProviders()) {
-		const keys = findEnvKeys(p.id, truthyEnv);
+	for (const p of [...builtinProviders(), antigravityProvider()]) {
+		const keys = p.id === "antigravity" ? ["ANTIGRAVITY_API_KEY"] : findEnvKeys(p.id, truthyEnv);
 		if (!keys || EXCLUDED_PROVIDERS.has(p.id)) continue;
 		const first = keys[0];
 		if (!first) continue; // unreachable with the truthy proxy — satisfies the checker

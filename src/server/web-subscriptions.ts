@@ -9,6 +9,7 @@ import { createChatGPT, fileStore } from "../../electron/chatgpt.cjs";
 import { createSubscriptions } from "../../electron/subscriptions.cjs";
 import { chatGPTControl } from "../../electron/chatgpt-ipc.cjs";
 import { subscriptionControl } from "../../electron/subscription-ipc.cjs";
+import { antigravityProvider } from "../../electron/antigravity-provider.cjs";
 import { emit } from "../core/events.ts";
 import type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 import type { NativeSubscriptionSnapshot } from "../core/contracts/subscriptions.ts";
@@ -16,8 +17,11 @@ import { configureWebSubscriptionRuntime, publishWebSubscriptionPacket, webSubsc
 export { webSubscriptionsEnabled } from "../agent/subscription-runtime.ts";
 interface BrowserAction { target: string; origin: string; scope: string; expires: number; current(): Promise<boolean> }
 const KEY = Symbol.for("lh.webSubscriptions");
+const BRIDGE_KEY = Symbol.for("lh.subscriptions.bridge");
+const CATALOG_VERSION = 5;
 interface Registry {
 	owner?: ReturnType<typeof createWebSubscriptionOwner>;
+	version?: number;
 }
 function registry(): Registry {
 	const global = globalThis as typeof globalThis & { [KEY]?: Registry };
@@ -33,7 +37,7 @@ async function loadSDK() {
 		import("@earendil-works/pi-ai/providers/github-copilot"),
 		import("@earendil-works/pi-ai/providers/xai"),
 	]);
-	return { ...sdk, ...copilot, ...xai };
+	return { ...sdk, ...copilot, ...xai, antigravityProvider };
 }
 
 /** Injectable factories/stores keep all test authentication offline. */
@@ -96,8 +100,13 @@ export function createWebSubscriptionOwner(options: {
 export function webSubscriptionOwner() {
 	if (!webSubscriptionsEnabled()) throw new Error("Web subscription controls are unavailable in desktop-owned mode.");
 	const state = registry();
-	if (!state.owner) {
+	if (!state.owner || state.version !== CATALOG_VERSION) {
+		state.owner?.close();
+		const bridge = (globalThis as Record<symbol, { statuses?: Map<unknown, unknown>; models?: Map<unknown, unknown> } | undefined>)[BRIDGE_KEY];
+		bridge?.statuses?.clear();
+		bridge?.models?.clear();
 		state.owner = createWebSubscriptionOwner({ directory: path.dirname(AUTH_FILE), onPacket: publish });
+		state.version = CATALOG_VERSION;
 		process.once("exit", () => state.owner?.close());
 	}
 	return state.owner;
