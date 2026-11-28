@@ -74,7 +74,7 @@ test("single user message passes through as text", () => {
 	assert.deepEqual(input.userContent, [{ type: "text", text: "what is a socket?" }]);
 });
 
-test("history renders user, assistant text, tool call name+JSON args and tool result text in order before the latest user message", () => {
+test("history renders the first learner message unlabelled, then closes a labelled block after each later learner message", () => {
 	const messages: Message[] = [
 		user([{ type: "text", text: "open notes.md" }]),
 		assistant([
@@ -85,15 +85,14 @@ test("history renders user, assistant text, tool call name+JSON args and tool re
 		assistant([{ type: "text", text: "It has a heading." }]),
 		user("summarise it"),
 	];
-	const expected = [
-		"[user]\nopen notes.md",
+	const history = [
 		"[assistant]\nReading it.",
 		'[tool call read] {"path":"notes.md"}',
 		"[tool result read]\n# Notes",
 		"[assistant]\nIt has a heading.",
 		"[user]\nsummarise it",
 	].join("\n\n");
-	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: expected }]);
+	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: "open notes.md" }, { type: "text", text: history }]);
 });
 
 test("error tool results are marked as errors in the replay", () => {
@@ -103,13 +102,8 @@ test("error tool results are marked as errors in the replay", () => {
 		toolResult("read", [{ type: "text", text: "ENOENT" }], true),
 		user("why?"),
 	];
-	const expected = [
-		"[user]\nopen missing.md",
-		'[tool call read] {"path":"missing.md"}',
-		"[tool result read error]\nENOENT",
-		"[user]\nwhy?",
-	].join("\n\n");
-	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: expected }]);
+	const history = ['[tool call read] {"path":"missing.md"}', "[tool result read error]\nENOENT", "[user]\nwhy?"].join("\n\n");
+	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: "open missing.md" }, { type: "text", text: history }]);
 });
 
 test("images in user and tool-result content become base64 image blocks", () => {
@@ -123,7 +117,7 @@ test("images in user and tool-result content become base64 image blocks", () => 
 		user("compare"),
 	];
 	assert.deepEqual(toClaudeInput(messages).userContent, [
-		{ type: "text", text: "[user]\nlook" },
+		{ type: "text", text: "look" },
 		{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
 		{ type: "text", text: "[tool call screenshot] {}\n\n[tool result screenshot]" },
 		{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "BBBB" } },
@@ -137,8 +131,8 @@ test("transcript ending on a tool result renders as history with no trailing use
 		assistant([{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "notes.md" } }]),
 		toolResult("read", [{ type: "text", text: "# Notes" }]),
 	];
-	const expected = ["[user]\nopen notes.md", '[tool call read] {"path":"notes.md"}', "[tool result read]\n# Notes"].join("\n\n");
-	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: expected }]);
+	const history = ['[tool call read] {"path":"notes.md"}', "[tool result read]\n# Notes"].join("\n\n");
+	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: "open notes.md" }, { type: "text", text: history }]);
 });
 
 test("thinking blocks are omitted from replay", () => {
@@ -150,7 +144,44 @@ test("thinking blocks are omitted from replay", () => {
 		]),
 		user("bye"),
 	];
-	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: "[user]\nhi\n\n[assistant]\nHello.\n\n[user]\nbye" }]);
+	assert.deepEqual(toClaudeInput(messages).userContent, [{ type: "text", text: "hi" }, { type: "text", text: "[assistant]\nHello.\n\n[user]\nbye" }]);
+});
+
+test("replay closes a text block after each learner message", () => {
+	const messages: Message[] = [
+		user("A"),
+		assistant([{ type: "text", text: "x" }]),
+		user("B"),
+		assistant([{ type: "toolCall", id: "t-1", name: "t", arguments: {} }]),
+		toolResult("t", [{ type: "text", text: "r" }]),
+		user("C"),
+	];
+	assert.deepEqual(toClaudeInput(messages).userContent, [
+		{ type: "text", text: "A" },
+		{ type: "text", text: "[assistant]\nx\n\n[user]\nB" },
+		{ type: "text", text: "[tool call t] {}\n\n[tool result t]\nr\n\n[user]\nC" },
+	]);
+});
+
+test("each replay starts with the previous replay's blocks unchanged, so the CLI's cache entry is reusable", () => {
+	const turns: Message[][] = [
+		[user([{ type: "text", text: "Teach me TCP." }, { type: "image", data: "AAAA", mimeType: "image/png" }])],
+		[assistant([{ type: "text", text: "Lesson one." }, { type: "toolCall", id: "q-1", name: "quiz", arguments: { question: "Q1?" } }]), toolResult("quiz", [{ type: "text", text: "answer one" }])],
+		[assistant([{ type: "text", text: "Lesson two." }]), user("why does SYN use a sequence number?")],
+		[assistant([{ type: "toolCall", id: "r-1", name: "read", arguments: { path: "notes.md" } }]), toolResult("read", [{ type: "text", text: "# Notes" }]), assistant([{ type: "text", text: "Because..." }]), user("next")],
+		[assistant([{ type: "text", text: "Lesson three." }]), user("thanks")],
+	];
+	let history: Message[] = [];
+	let previous: ReturnType<typeof toClaudeInput>["userContent"] | undefined;
+	for (const turn of turns) {
+		history = [...history, ...turn];
+		const current = toClaudeInput(history).userContent;
+		// A request that ended on a learner message must reappear block for block.
+		if (previous && history[history.length - turn.length - 1]?.role === "user") {
+			assert.deepEqual(current.slice(0, previous.length), previous);
+		}
+		previous = current;
+	}
 });
 
 test('toStreamJsonLine emits {"type":"user","message":{"role":"user","content":[...]}}', () => {

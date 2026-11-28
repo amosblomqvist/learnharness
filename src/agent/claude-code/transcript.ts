@@ -77,11 +77,28 @@ function toUnlabelledBlocks(content: string | (TextContent | ImageContent)[]): C
 	return content.map((block) => (block.type === "text" ? { type: "text", text: block.text } : toImageBlock(block)));
 }
 
+// Prompt caching matches only at block boundaries, and the CLI caches up to the end of each request.
+// The first learner message stays unlabelled, exactly as the first request sent it, and a block closes
+// after each later learner message, so the next replay starts with this one's blocks unchanged.
 function toUserContent(conversation: Message[]): ClaudeContentBlock[] {
 	const [first] = conversation;
-	if (conversation.length === 1 && first?.role === "user") return toUnlabelledBlocks(first.content);
+	const leadsWithUser = first?.role === "user";
+	const blocks: ClaudeContentBlock[] = leadsWithUser ? toUnlabelledBlocks(first.content) : [];
+	let pending: ReplayPart[] = [];
 
-	return toContentBlocks(conversation.flatMap(getReplayParts));
+	const flush = () => {
+		blocks.push(...toContentBlocks(pending));
+		pending = [];
+	};
+
+	for (const message of leadsWithUser ? conversation.slice(1) : conversation) {
+		pending.push(...getReplayParts(message));
+		if (message.role === "user") flush();
+	}
+
+	flush();
+
+	return blocks;
 }
 
 export function toClaudeInput(messages: Message[]): ClaudeInput {
