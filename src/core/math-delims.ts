@@ -54,6 +54,33 @@ export function transformMathDelimiters(markdown: string): string {
 	}).join("");
 }
 
+/** Streamdown renders each Markdown block on its own. Its splitter keeps a
+ * formula in one block by counting `$$` runs, including runs inside code, so
+ * a `$$` code span can let a formula be cut in two (e.g. at a lone `=` line,
+ * which the block lexer reads as a heading underline). Rejoin blocks whose
+ * boundary falls inside math. Blocks are only joined, never split or edited. */
+export function joinSplitMathBlocks(blocks: string[]): string[] {
+	if (blocks.length < 2) return blocks;
+	const text = blocks.join("");
+	if (!text.includes("$$")) return blocks;
+	const math: Array<{ start: number; end: number }> = [];
+	let offset = 0;
+	for (const span of readContentSpans(text)) {
+		if (span.kind === "math") math.push({ start: offset, end: offset + span.raw.length });
+		offset += span.raw.length;
+	}
+	const joined: string[] = [];
+	let start = 0, next = 0;
+	for (const block of blocks) {
+		while (next < math.length && math[next]!.end <= start) next++;
+		const span = math[next];
+		if (joined.length > 0 && span && span.start < start) joined[joined.length - 1] += block;
+		else joined.push(block);
+		start += block.length;
+	}
+	return joined;
+}
+
 const DEBRIS: Record<string, string> = {
 	"\b": "\\b", "\t": "\\t", "\v": "\\v", "\f": "\\f", "\r": "\\r",
 };

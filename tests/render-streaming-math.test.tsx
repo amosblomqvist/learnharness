@@ -5,7 +5,8 @@ import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
+import { MessageResponse, ToolContentResponse, streamdownBlocks } from "../components/ai-elements/message.tsx";
+import { parseMarkdownIntoBlocks } from "streamdown";
 import { Reasoning, ReasoningContent } from "../components/ai-elements/reasoning.tsx";
 import { transformMathDelimiters } from "../src/core/math-delims.ts";
 
@@ -65,6 +66,16 @@ for (const [name, surface] of Object.entries(surfaces)) describe(`streaming math
 		}
 	});
 
+	// #388: `$$` in inline code skewed Streamdown's block split, and the lone
+	// `=` line (a setext underline to the block lexer) then cut the formula.
+	it("keeps a display formula whole after `$$` in inline code", () => {
+		const document = documentFor(surface("Put `$$` on their own lines.\n\nDifference:\n$$\na\n=\nb\n$$\n\nTAIL"));
+		assert.deepEqual(annotations(document), ["a\n=\nb"]);
+		assert.equal(document.querySelectorAll(".katex-error").length, 0);
+		assert.equal(document.querySelector("code")?.textContent, "$$");
+		assert.ok(document.body.textContent.includes("TAIL"));
+	});
+
 	it("shows unfinished HTML literally but keeps complete HTML formatting", () => {
 		const partial = documentFor(surface("before <b TAIL"));
 		assert.equal(partial.body.textContent, "before <b TAIL");
@@ -101,6 +112,17 @@ it("preserves native TeX source in both streaming and static modes", () => {
 	assert.deepEqual(annotations(streaming), annotations(staticDocument));
 	assert.deepEqual([...streaming.querySelectorAll(".katex-html")].map(node => node.innerHTML),
 		[...staticDocument.querySelectorAll(".katex-html")].map(node => node.innerHTML));
+});
+
+it("joins Streamdown blocks only where a formula would be cut", () => {
+	const source = "Put `$$` on their own lines.\n\nDifference:\n$$\na\n=\nb\n$$\n\nTAIL";
+	const blocks = streamdownBlocks(source);
+	assert.equal(blocks.join(""), source);
+	assert.ok(blocks.some(block => block.includes("$$\na\n=\nb\n$$")));
+	assert.ok(parseMarkdownIntoBlocks(source).every(block => !block.includes("$$\na\n=\nb\n$$")), "Streamdown alone cuts the formula");
+	for (const plain of ["one\n\ntwo\n\nthree", "Put `$$` here.\n\nnext\n\nlast"]) {
+		assert.deepEqual(streamdownBlocks(plain), parseMarkdownIntoBlocks(plain));
+	}
 });
 
 // Exercise successive updates on the SAME mounted components, rather than
