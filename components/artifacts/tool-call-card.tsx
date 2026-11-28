@@ -2,6 +2,7 @@
 
 import { ChevronRight } from "lucide-react";
 import type { ArtifactPartProps } from "@/src/core";
+import { useTranscriptState } from "../transcript-row-state";
 
 /**
  * The generic tool-call card (sources v1, 2026-09-19): a quiet, collapsed
@@ -63,12 +64,15 @@ function outputText(output: unknown): string | null {
 
 export function ToolCallCard({ part }: ArtifactPartProps) {
 	const p = part as ToolCallPart;
+	const [open, setOpen] = useTranscriptState(`tool:${p.toolCallId}`, false);
 	const tool = p.type.replace(/^tool-/, "");
 	const arg = headlineArg(tool, p.input);
 	const out = outputText(p.output);
 	const failed = p.state === "output-error" || typeof p.errorText === "string";
 	return (
 		<details
+			open={open}
+			onToggle={event => setOpen(event.currentTarget.open)}
 			data-testid="tool-call-card"
 			data-tool={tool}
 			className="group my-1 w-full max-w-2xl select-none"

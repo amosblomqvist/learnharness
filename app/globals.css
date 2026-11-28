@@ -844,6 +844,13 @@ body {
 	contain-intrinsic-block-size: auto 800px;
 }
 
+/* Virtual rows already bound the mounted history. Their observer needs the
+   actual contents' height, rather than a second CSS placeholder estimate. */
+[data-virtual-transcript] [data-older-transcript-row] {
+	content-visibility: visible;
+	contain-intrinsic-block-size: none;
+}
+
 /* Source-message arrival: a brief, static theme-colored spotlight. */
 .lh-source-passage {
 	scroll-margin-top: 1rem;
